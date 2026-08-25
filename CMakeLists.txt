@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(SensorHub VERSION 0.1.0 LANGUAGES CXX)
+project(SensorHub)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,7 +16,6 @@ else()
     set(QT_LIB_PREFIX Qt6)
 endif()
 
-
 if(MSVC)
     add_compile_options(/W4 /utf-8 /permissive-)
 else()
@@ -24,6 +23,9 @@ else()
 endif()
 
 # 可执行目标
-add_executable(SensorHub src/main.cpp)
+add_executable(SensorHub
+    src/main.cpp
+    src/data/SimulationProducer.cpp
+)
 target_link_libraries(SensorHub PRIVATE ${QT_LIB_PREFIX}::Widgets)
 target_include_directories(SensorHub PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
