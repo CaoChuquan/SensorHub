@@ -2,49 +2,50 @@
 #include <QDateTime>
 #include <QRandomGenerator>
 
-// 仿真数据源实现
 namespace sensorhub {
 
 namespace {
-// 3 个仿真设备的 ID
+
+// 被监控的 3 个 机柜
 constexpr int kDeviceCount = 3;
-const char* const kDeviceIds[kDeviceCount] = {"device01", "device02", "device03"};
+const char* kDeviceId[kDeviceCount] = { "rack1", "rack2", "rack3" };
 
-// 每个设备每 tick 产 3 种读数
-const char* const kTypes[3] = {"temperature", "humidity", "pressure"};
+// 每个机柜采集 3 种指标：温度、湿度、电压
+const char* const kTypes[3] = { "temperature", "humidity", "voltage" };
 
-// 各类型的基线 + 抖动幅度，让仿真数据看着像真的
-struct Range { double base; double jitter; };
-Range rangeFor(const QString& type) {
-    if (type == "temperature") return {22.0,   4.0};  // 22 ± 4 ℃
-    if (type == "humidity")    return {55.0,  10.0};  // 55 ± 10 %RH
-    return {1013.0, 5.0};                              // 1013 ± 5 hPa
+// 各指标基线 + 抖动幅度，贴近机房真实工况
+struct Range {
+    double base;
+    double jitter;
+};
+
+Range rangerFor(const QString& type) {
+    if (type == "temperature") return { 24.0,  2.0 };  //  24 ± 2 ℃
+    if (type == "humidity")    return { 50.0, 10.0 };  //  50 ± 10 %RH
+    return { 220.0, 5.0 };                             // 220 ± 5 V
 }
+
 } // namespace
 
-SimulationProducer::SimulationProducer(QObject* parent)
-    : QObject(parent) {
-    timer_.setInterval(1000); // 每秒一帧
+SimulationProducer::SimulationProducer(QObject* parent) : QObject(parent) {
+    timer_.setInterval(1000);  // 设置一秒间隔
     connect(&timer_, &QTimer::timeout, this, &SimulationProducer::produceTick);
 }
-
-void SimulationProducer::start() { timer_.start(); }
-void SimulationProducer::stop()  { timer_.stop();  }
 
 void SimulationProducer::produceTick() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     for (int i = 0; i < kDeviceCount; ++i) {
         for (int t = 0; t < 3; ++t) {
             const QString type = QString::fromLatin1(kTypes[t]);
-            const Range r = rangeFor(type);
+            const Range r = rangerFor(type);
             // generateDouble() 返回 [0,1)，映射到 [-jitter, +jitter] 再叠加基线
             const double value =
                 r.base + (QRandomGenerator::global()->generateDouble() - 0.5) * 2.0 * r.jitter;
             const SensorReading reading{
-                QString::fromLatin1(kDeviceIds[i]), type, value, now};
+                QString::fromLatin1(kDeviceId[i]), type, value, now};
             emit newReading(reading);
         }
-    }
+    }    
 }
 
 } // namespace sensorhub

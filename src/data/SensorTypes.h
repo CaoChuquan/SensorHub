@@ -1,5 +1,4 @@
-#ifndef SENSORHUB_SENSOR_TYPES_H
-#define SENSORHUB_SENSOR_TYPES_H
+#pragma once
 
 #include <QMetaType>
 #include <QString>
@@ -8,9 +7,9 @@
 // 数据源、UI、存档、告警都用它，所以放在最上层被所有模块 include
 namespace sensorhub {
 
-// 一条传感器读数
+// 机房环境读数
 struct SensorReading {
-    QString sensorId;        // 传感器标识
+    QString sensorId;        // 采集点标识
     QString type;            // 读数类型
     double value = 0.0;      // 数值
     qint64  timestampMs = 0; // 时间戳
@@ -23,5 +22,3 @@ struct SensorReading {
 } // namespace sensorhub
 
 Q_DECLARE_METATYPE(sensorhub::SensorReading);
-
-#endif // SENSORHUB_SENSOR_TYPES_H

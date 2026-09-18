@@ -25,6 +25,7 @@ endif()
 # 可执行目标
 add_executable(SensorHub
     src/main.cpp
+    src/core/DataHub.cpp
     src/data/SimulationProducer.cpp
 )
 target_link_libraries(SensorHub PRIVATE ${QT_LIB_PREFIX}::Widgets)

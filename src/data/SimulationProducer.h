@@ -1,30 +1,29 @@
-#ifndef SENSORHUB_SIMULATION_PRODUCER_H
-#define SENSORHUB_SIMULATION_PRODUCER_H
+#pragma once
 
+#include "SensorTypes.h"
 #include <QObject>
 #include <QTimer>
 
-#include "SensorTypes.h"
-
 namespace sensorhub {
 
+// 生产仿真数据
 class SimulationProducer : public QObject {
     Q_OBJECT
 public:
     explicit SimulationProducer(QObject* parent = nullptr);
 
-    void start(); // 启动定时采样
-    void stop();  // 停止采样
-
+    // 启动定时采样
+    void start() { timer_.start(); } 
+    // 停止采样
+    void stop() { timer_.stop(); }    
 signals:
-    // 每产生一条读数就发一次。
+    // 发送读数
     void newReading(const sensorhub::SensorReading& reading);
 private slots:
-    void produceTick(); // 定时器槽：生成一批读数
+    // 定时槽：生成一批读数
+    void produceTick();
 private:
     QTimer timer_;
 };
 
 } // namespace sensorhub
-
-#endif // SENSORHUB_SIMULATION_PRODUCER_H
