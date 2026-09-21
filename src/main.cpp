@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QDateTime>
+#include <QDebug>
 #include <QLabel>
 #include <QMainWindow>
 #include <QStringLiteral>
@@ -7,6 +8,8 @@
 #include "core/DataHub.h"
 #include "data/SensorTypes.h"
 #include "data/SimulationProducer.h"
+#include "services/SensorArchiveService.h"
+#include "storage/Database.h"
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -26,8 +29,20 @@ int main(int argc, char* argv[]) {
         "font-size: 14px; padding: 8px;"));
     window.setCentralWidget(view);
 
+    // 消费者：写入库
+    sensorhub::Database database;
+    if (!database.open()) {
+        qWarning() << QStringLiteral("数据库打开失败:")
+                   << database.lastError()
+                   << QStringLiteral("（存档功能不可用，实时显示不受影响）");
+    }
+
+    // 所有读数经过 DataHub 中转，降低代码耦合性
     sensorhub::DataHub hub;
     sensorhub::SimulationProducer producer;
+
+    // 存档服务
+    sensorhub::SensorArchiveService archiever(hub, database);
 
     QObject::connect(&producer, &sensorhub::SimulationProducer::newReading,
                      &hub, &sensorhub::DataHub::publish);

@@ -14,7 +14,7 @@ public slots:
     // 生产者入口
     void publish(const sensorhub::SensorReading& reading);
 signals:
-    // 消费者入口
+    // 消费者入口，当有数据时，此信号被发射
     void readingReceived(const sensorhub::SensorReading& reading);
 };
 
