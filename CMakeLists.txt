@@ -30,6 +30,8 @@ add_executable(SensorHub
     src/data/SimulationProducer.cpp
     src/services/SensorArchiveService.cpp
     src/storage/Database.cpp
+    src/ui/MainWindow.cpp
+    src/ui/SensorScreen.cpp
 )
 target_link_libraries(SensorHub PRIVATE
     ${QT_LIB_PREFIX}::Widgets

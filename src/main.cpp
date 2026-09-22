@@ -1,8 +1,5 @@
 #include <QApplication>
-#include <QDateTime>
 #include <QDebug>
-#include <QLabel>
-#include <QMainWindow>
 #include <QStringLiteral>
 
 #include "core/DataHub.h"
@@ -10,6 +7,9 @@
 #include "data/SimulationProducer.h"
 #include "services/SensorArchiveService.h"
 #include "storage/Database.h"
+#include "ui/MainWindow.h"
+
+using namespace sensorhub;
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -17,46 +17,31 @@ int main(int argc, char* argv[]) {
     // 注册自定义类型到 Qt 元类型系统
     qRegisterMetaType<sensorhub::SensorReading>("sensorhub::SensorReading");
 
-    QMainWindow window;
-    window.setWindowTitle(QStringLiteral("SensorHub"));
-    window.resize(900, 600);
-
-    // 临时用 QLabel 当实时显示面板
-    auto* view = new QLabel(QStringLiteral("等待机房探头数据...\n"));
-    view->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    view->setStyleSheet(QStringLiteral(
-        "font-family: Consolas, 'Courier New', monospace;"
-        "font-size: 14px; padding: 8px;"));
-    window.setCentralWidget(view);
-
-    // 消费者：写入库
-    sensorhub::Database database;
+    // 建数据库
+    Database database;
     if (!database.open()) {
         qWarning() << QStringLiteral("数据库打开失败:")
                    << database.lastError()
                    << QStringLiteral("（存档功能不可用，实时显示不受影响）");
     }
 
-    // 所有读数经过 DataHub 中转，降低代码耦合性
-    sensorhub::DataHub hub;
-    sensorhub::SimulationProducer producer;
+    // 创建 DataHub
+    DataHub hub;
 
-    // 存档服务
-    sensorhub::SensorArchiveService archiever(hub, database);
+    // 消费者：存档服务
+    SensorArchiveService archive(hub, database);
 
-    QObject::connect(&producer, &sensorhub::SimulationProducer::newReading,
-                     &hub, &sensorhub::DataHub::publish);
-    QObject::connect(&hub, &sensorhub::DataHub::readingReceived,
-                     view, [&view](const sensorhub::SensorReading& r) {
-        view->setText(view->text() + QStringLiteral("[%1] %2/%3 = %4\n")
-            .arg(QDateTime::fromMSecsSinceEpoch(r.timestampMs).toString("hh:mm:ss"))
-            .arg(r.sensorId, r.type)
-            .arg(r.value, 0, 'f', 2));
-    });
-
-    // 开启每秒采样
-    producer.start();
-    window.show();
+    // 创建界面
+    MainWindow window(hub);
     
+    // 生产者
+    sensorhub::SimulationProducer producer;
+    QObject::connect(&producer, &SimulationProducer::newReading,
+                     &hub, &DataHub::publish);
+      
+    // 启动生产者和窗口
+    producer.start();
+    window.show();                 
+
     return app.exec();
 }
