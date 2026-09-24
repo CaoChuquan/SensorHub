@@ -8,6 +8,7 @@
 #include "services/SensorArchiveService.h"
 #include "storage/Database.h"
 #include "ui/MainWindow.h"
+#include "services/WatchlistService.h"
 
 using namespace sensorhub;
 
@@ -25,17 +26,20 @@ int main(int argc, char* argv[]) {
                    << QStringLiteral("（存档功能不可用，实时显示不受影响）");
     }
 
+    // 关注列表服务
+    WatchlistService watchlistService(database);
+
     // 创建 DataHub
     DataHub hub;
 
     // 消费者：存档服务
     SensorArchiveService archive(hub, database);
 
-    // 创建界面
-    MainWindow window(hub);
+    // 创建 MainWindow 界面
+    MainWindow window(hub, watchlistService);
     
     // 生产者
-    sensorhub::SimulationProducer producer;
+    SimulationProducer producer;
     QObject::connect(&producer, &SimulationProducer::newReading,
                      &hub, &DataHub::publish);
       

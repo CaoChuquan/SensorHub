@@ -36,6 +36,16 @@ bool Database::open() {
         "CREATE INDEX IF NOT EXISTS idx_readings_sensor_ts"
         " ON sensor_readings(sensor_id, timestamp_ms DESC)"));
 
+    // 第二张表：用户关注列表。sensor_id + type 联合唯一，防重复关注
+    query.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS watchlist ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " sensor_id TEXT NOT NULL,"
+        " type TEXT NOT NULL,"
+        " label TEXT,"
+        " added_at_ms INTEGER NOT NULL,"
+        " UNIQUE(sensor_id, type))"));
+
     return true;
 }
 

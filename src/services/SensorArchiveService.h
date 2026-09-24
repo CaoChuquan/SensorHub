@@ -9,6 +9,7 @@ namespace sensorhub {
 
 class Database;
 
+// 数据存档服务类：将读数落盘到 SQLite
 class SensorArchiveService : public QObject {
     Q_OBJECT
 public:

@@ -5,6 +5,7 @@
 
 namespace sensorhub {
 
+// Database 类的作用：建目录，开 WAL，建表
 class Database {
 public:
     Database() = default;

@@ -19,6 +19,21 @@ struct SensorReading {
         : sensorId(std::move(id)), type(std::move(t)), value(v), timestampMs(ts) {}
 };
 
+// 用户在关注列表中手动添加的监控条目
+// 一个 WatchlistEntry 结构变量对应
+struct WatchlistEntry {
+    int id = 0;             // 数据库自增主键，0 表示尚未持久化
+    QString sensorId;       // 关联的采集点 ID，如 "rack01"
+    QString type;           // 指标类型
+    QString label;          // 用户可选自定义标签
+    qint64 addedAtMs = 0;   // 添加时间，用于排序和展示
+
+    WatchlistEntry() = default;
+    WatchlistEntry(QString id, QString t, QString lbl, qint64 ts)
+        : sensorId(std::move(id)), type(std::move(t))
+        , label(std::move(lbl)), addedAtMs(ts) {}
+};
+
 } // namespace sensorhub
 
 Q_DECLARE_METATYPE(sensorhub::SensorReading);
