@@ -28,10 +28,13 @@ add_executable(SensorHub
     src/main.cpp
     src/core/DataHub.cpp
     src/data/SimulationProducer.cpp
+    src/services/AnalysisService.cpp
     src/services/SensorArchiveService.cpp
     src/services/WatchlistService.cpp
     src/storage/Database.cpp
+    src/storage/SensorRepository.cpp
     src/storage/WatchlistRepository.cpp
+    src/ui/AnalysisScreen.cpp
     src/ui/MainWindow.cpp
     src/ui/SensorScreen.cpp
     src/ui/WatchlistScreen.cpp

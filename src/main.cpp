@@ -9,6 +9,7 @@
 #include "storage/Database.h"
 #include "ui/MainWindow.h"
 #include "services/WatchlistService.h"
+#include "services/AnalysisService.h"
 
 using namespace sensorhub;
 
@@ -17,6 +18,9 @@ int main(int argc, char* argv[]) {
 
     // 注册自定义类型到 Qt 元类型系统
     qRegisterMetaType<sensorhub::SensorReading>("sensorhub::SensorReading");
+    qRegisterMetaType<sensorhub::AnalysisStats>("sensorhub::AnalysisStats");
+    qRegisterMetaType<QVector<sensorhub::AnomalyPoint>>(
+        "QVector<sensorhub::AnomalyPoint>");
 
     // 建数据库
     Database database;
@@ -28,6 +32,8 @@ int main(int argc, char* argv[]) {
 
     // 关注列表服务
     WatchlistService watchlistService(database);
+    // 统计分析服务
+    sensorhub::AnalysisService analysisService(database);
 
     // 创建 DataHub
     DataHub hub;
@@ -36,7 +42,7 @@ int main(int argc, char* argv[]) {
     SensorArchiveService archive(hub, database);
 
     // 创建 MainWindow 界面
-    MainWindow window(hub, watchlistService);
+    MainWindow window(hub, watchlistService, analysisService);
     
     // 生产者
     SimulationProducer producer;

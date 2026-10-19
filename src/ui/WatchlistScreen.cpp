@@ -126,8 +126,8 @@ void WatchlistScreen::onAddClicked() {
     bool ok = false;
     const QString sensorId = QInputDialog::getText(this,
         QStringLiteral("添加关注"),
-        QStringLiteral("传感器 ID (如 rack01):"),
-        QLineEdit::Normal, QStringLiteral("rack01"), &ok);
+        QStringLiteral("传感器 ID (如 rack1):"),
+        QLineEdit::Normal, QStringLiteral("rack1"), &ok);
     if (!ok || sensorId.isEmpty()) return;
 
     const QString type = QInputDialog::getText(this,

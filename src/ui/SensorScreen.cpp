@@ -28,7 +28,11 @@ SensorScreen::SensorScreen(DataHub& hub, QWidget* parent)
     // 建表格
     table_ = new QTableWidget(3, kColumnCount, this);
     table_->setHorizontalHeaderLabels({
-
+        QStringLiteral("机柜"),
+        QStringLiteral("温度(°C)"),
+        QStringLiteral("湿度(%RH)"),
+        QStringLiteral("电压(V)"),
+        QStringLiteral("更新时间"),
     });
     // 对表格进行设置
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
