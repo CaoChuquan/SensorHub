@@ -10,6 +10,7 @@
 #include "ui/MainWindow.h"
 #include "services/WatchlistService.h"
 #include "services/AnalysisService.h"
+#include "services/ChartService.h"
 
 using namespace sensorhub;
 
@@ -33,7 +34,9 @@ int main(int argc, char* argv[]) {
     // 关注列表服务
     WatchlistService watchlistService(database);
     // 统计分析服务
-    sensorhub::AnalysisService analysisService(database);
+    AnalysisService analysisService(database);
+    // 时序图服务
+    ChartService chartService(database);
 
     // 创建 DataHub
     DataHub hub;
@@ -42,7 +45,7 @@ int main(int argc, char* argv[]) {
     SensorArchiveService archive(hub, database);
 
     // 创建 MainWindow 界面
-    MainWindow window(hub, watchlistService, analysisService);
+    MainWindow window(hub, watchlistService, analysisService, chartService);
     
     // 生产者
     SimulationProducer producer;

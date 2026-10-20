@@ -8,9 +8,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 
 # 寻找 Qt 与Sql 模块（SQLite 存档）
-find_package(Qt6 COMPONENTS Widgets Sql QUIET)
+find_package(Qt6 COMPONENTS Widgets Sql Charts QUIET)
 if(NOT Qt6_FOUND)
-    find_package(Qt5 COMPONENTS Widgets Sql REQUIRED)
+    find_package(Qt5 COMPONENTS Widgets Sql Charts REQUIRED)
     set(QT_LIB_PREFIX Qt5)
 else()
     set(QT_LIB_PREFIX Qt6)
@@ -38,9 +38,12 @@ add_executable(SensorHub
     src/ui/MainWindow.cpp
     src/ui/SensorScreen.cpp
     src/ui/WatchlistScreen.cpp
+    src/services/ChartService.cpp
+    src/ui/ChartScreen.cpp
 )
 target_link_libraries(SensorHub PRIVATE
     ${QT_LIB_PREFIX}::Widgets
     ${QT_LIB_PREFIX}::Sql
+    ${QT_LIB_PREFIX}::Charts
 )
 target_include_directories(SensorHub PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
