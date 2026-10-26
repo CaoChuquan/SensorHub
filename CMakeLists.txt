@@ -28,18 +28,21 @@ add_executable(SensorHub
     src/main.cpp
     src/core/DataHub.cpp
     src/data/SimulationProducer.cpp
+    src/services/AlarmService.cpp
     src/services/AnalysisService.cpp
+    src/services/ChartService.cpp
     src/services/SensorArchiveService.cpp
     src/services/WatchlistService.cpp
+    src/storage/AlarmRepository.cpp
     src/storage/Database.cpp
     src/storage/SensorRepository.cpp
     src/storage/WatchlistRepository.cpp
+    src/ui/AlarmScreen.cpp
     src/ui/AnalysisScreen.cpp
+    src/ui/ChartScreen.cpp
     src/ui/MainWindow.cpp
     src/ui/SensorScreen.cpp
     src/ui/WatchlistScreen.cpp
-    src/services/ChartService.cpp
-    src/ui/ChartScreen.cpp
 )
 target_link_libraries(SensorHub PRIVATE
     ${QT_LIB_PREFIX}::Widgets

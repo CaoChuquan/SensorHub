@@ -4,6 +4,7 @@
 #include "WatchlistScreen.h"
 #include "ui/AnalysisScreen.h"
 #include "ui/ChartScreen.h"
+#include "ui/AlarmScreen.h"
 #include <QTabWidget>
 #include <QStringLiteral>
 
@@ -12,6 +13,7 @@ namespace sensorhub {
 MainWindow::MainWindow(DataHub& hub, WatchlistService& wl_service,
                        AnalysisService& al_service,
                        ChartService& chartService,
+                       AlarmService& alarmService,
                        QWidget* parent) : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("机房环境监控终端"));
@@ -19,17 +21,15 @@ MainWindow::MainWindow(DataHub& hub, WatchlistService& wl_service,
 
     // 传感器页面
     tabs_ = new QTabWidget(this);
-    tabs_->addTab(new SensorScreen(hub, tabs_),
-                  QStringLiteral("实时读数"));
+    tabs_->addTab(new SensorScreen(hub, tabs_), QStringLiteral("实时读数"));
     // 关注列表页面
-    tabs_->addTab(new WatchlistScreen(hub, wl_service, tabs_),
-                  QStringLiteral("关注列表"));
-
+    tabs_->addTab(new WatchlistScreen(hub, wl_service, tabs_), QStringLiteral("关注列表"));
     // 统计分析页面
     tabs_->addTab(new AnalysisScreen(al_service, tabs_), QStringLiteral("统计分析"));
-
     // 时序图页面
     tabs_->addTab(new ChartScreen(chartService, tabs_), QStringLiteral("时序图"));
+    // 告警页面
+    tabs_->addTab(new AlarmScreen(alarmService, tabs_), QStringLiteral("告警面板")); 
 
     setCentralWidget(tabs_);
 }
