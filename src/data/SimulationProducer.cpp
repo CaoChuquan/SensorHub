@@ -21,16 +21,19 @@ struct Range {
 
 Range rangerFor(const QString& type) {
     if (type == "temperature") return { 24.0,  2.0 };  //  24 ± 2 ℃
-    if (type == "humidity")    return { 50.0, 10.0 };  //  50 ± 10 %RH
+    if (type == "humidity") return { 50.0, 10.0 };  //  50 ± 10 %RH
     return { 220.0, 5.0 };                             // 220 ± 5 V
 }
 
 } // namespace
 
-SimulationProducer::SimulationProducer(QObject* parent) : QObject(parent) {
+SimulationProducer::SimulationProducer(QObject* parent) : ISensorProducer(parent) {
     timer_.setInterval(1000);  // 设置一秒间隔
     connect(&timer_, &QTimer::timeout, this, &SimulationProducer::produceTick);
 }
+
+void SimulationProducer::start() { timer_.start(); }
+void SimulationProducer::stop() { timer_.stop(); }
 
 void SimulationProducer::produceTick() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -45,7 +48,7 @@ void SimulationProducer::produceTick() {
                 QString::fromLatin1(kDeviceId[i]), type, value, now};
             emit newReading(reading);
         }
-    }    
+    }
 }
 
 } // namespace sensorhub

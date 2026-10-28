@@ -1,11 +1,13 @@
 #include <QApplication>
 #include <QDebug>
 #include <QStringLiteral>
+#include <memory>
 
 #include "core/DataHub.h"
 #include "data/SensorTypes.h"
 #include "data/SimulationProducer.h"
 #include "data/AlarmTypes.h"
+#include "data/ISensorProducer.h"
 #include "services/SensorArchiveService.h"
 #include "storage/Database.h"
 #include "ui/MainWindow.h"
@@ -52,14 +54,15 @@ int main(int argc, char* argv[]) {
     // 创建 MainWindow 界面
     MainWindow window(hub, watchlistService, analysisService, chartService,
                       alarmService);
-    
+
     // 生产者
-    SimulationProducer producer;
-    QObject::connect(&producer, &SimulationProducer::newReading,
+    std::unique_ptr<ISensorProducer> producer = 
+        std::make_unique<SimulationProducer>();
+    QObject::connect(producer.get(), &ISensorProducer::newReading,
                      &hub, &DataHub::publish);
-      
+
     // 启动生产者和窗口
-    producer.start();
+    producer->start();
     window.show();                 
 
     return app.exec();

@@ -28,6 +28,7 @@ add_executable(SensorHub
     src/main.cpp
     src/core/DataHub.cpp
     src/data/SimulationProducer.cpp
+    src/data/ISensorProducer.cpp
     src/services/AlarmService.cpp
     src/services/AnalysisService.cpp
     src/services/ChartService.cpp
