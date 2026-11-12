@@ -1,7 +1,6 @@
 #include "ModbusProducer.h"
 #include <QDateTime>
 #include <QDebug>
-#include <utility>
 
 namespace sensorhub {
 
@@ -50,7 +49,7 @@ ModbusProducer::ModbusProducer(QString host, quint16 port, QObject* parent)
 
     timeoutTimer_.setSingleShot(true);   // 设置 timeoutTimer_ 计时器只响应一次
     timeoutTimer_.setInterval(kReplyTimeoutMs);
-    connect(&timeoutTimer_, QTimer::timeout, 
+    connect(&timeoutTimer_, &QTimer::timeout,
             this, &ModbusProducer::onRequestTimeout);
     
     // 连接 QTcpSocket 相关信号
