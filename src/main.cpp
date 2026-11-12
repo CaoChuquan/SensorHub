@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <QStringLiteral>
+#include <QCommandLineParser>
 #include <memory>
 
 #include "core/DataHub.h"
@@ -15,11 +16,29 @@
 #include "services/AnalysisService.h"
 #include "services/ChartService.h"
 #include "services/AlarmService.h"
+#include "data/ModbusProducer.h"
 
 using namespace sensorhub;
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("SensorHub"));
+
+    // 命令行参数：决定用哪种数据源
+    // 不填 --modbus 就用仿真数据
+    // 填了就从真实设备读，例如：SensorHub.exe --modbus 192.168.1.100:502
+    QCommandLineParser parser;
+    parser.setApplicationDescription(
+        QStringLiteral("SensorHub 机房环境监控终端"));
+    parser.addHelpOption();
+    parser.addVersionOption();
+    QCommandLineOption modbusOption(
+        QStringLiteral("modbus"),
+        QStringLiteral("从 Modbus TCP 设备采集数据，格式 IP[:端口]，默认端口 502"
+                       "不填则使用仿真数据"),
+        QStringLiteral("地址"));
+    parser.addOption(modbusOption);
+    parser.process(app);
 
     // 注册自定义类型到 Qt 元类型系统
     qRegisterMetaType<sensorhub::SensorReading>("sensorhub::SensorReading");
@@ -58,12 +77,42 @@ int main(int argc, char* argv[]) {
     // 生产者
     std::unique_ptr<ISensorProducer> producer = 
         std::make_unique<SimulationProducer>();
+
+    const QString modbusAddress = parser.value(modbusOption).trimmed(); 
+    if (modbusAddress.isEmpty()) {
+        producer = std::make_unique<sensorhub::SimulationProducer>();
+        qInfo() << "数据源：仿真（未指定 --modbus）";
+    } 
+    else {
+        // 支持 "192.168.1.100" 和 "192.168.1.100:1502" 两种写法
+        QString host = modbusAddress;
+        quint16 port = 502;
+        const int colon = host.lastIndexOf(QLatin1Char(':'));
+        if (colon > 0) {
+            bool ok = false;
+            const uint parsed = host.mid(colon + 1).toUInt(&ok);
+            if (ok && parsed > 0 && parsed <= 65535) {
+                port = static_cast<quint16>(parsed);
+                host = host.left(colon);
+            }
+        }
+        producer = std::make_unique<sensorhub::ModbusProducer>(host, port);
+        qInfo() << "数据源：Modbus TCP" << host << port;
+    }
+
     QObject::connect(producer.get(), &ISensorProducer::newReading,
                      &hub, &DataHub::publish);
 
     // 启动生产者和窗口
     producer->start();
-    window.show();                 
+    window.show();
+    
+    // 进入 Qt 事件循环，窗口关闭后返回
+    const int exitCode = app.exec();
 
-    return app.exec();
+    // 先主动停掉采集，再让下面的栈对象析构：
+    // 这样退出瞬间不会再有读数进来，也不会误报"设备掉线"
+    producer->stop();
+
+    return exitCode;
 }
