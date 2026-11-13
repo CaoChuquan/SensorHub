@@ -18,10 +18,13 @@ struct Point {
     const char* type;
 };
 
+// 点表：第几个寄存器对应哪个机柜的哪个指标。
+// 注意 sensorId 必须和 SensorScreen 里的 kRackIds 完全一致（rack1/rack2/rack3），
+// 否则界面按 ID 找不到对应行，会把读数直接忽略——表现为"终端在动、界面不动"。
 const Point kPoints[ModbusProducer::kRegisterCount] = {
-    {"rack01", "temperature"}, {"rack01", "humidity"}, {"rack01", "voltage"},
-    {"rack02", "temperature"}, {"rack02", "humidity"}, {"rack02", "voltage"},
-    {"rack03", "temperature"}, {"rack03", "humidity"}, {"rack03", "voltage"},
+    {"rack1", "temperature"}, {"rack1", "humidity"}, {"rack1", "voltage"},
+    {"rack2", "temperature"}, {"rack2", "humidity"}, {"rack2", "voltage"},
+    {"rack3", "temperature"}, {"rack3", "humidity"}, {"rack3", "voltage"},
 };
 
 // Modbus 规定多字节数字"高位在前"，Qt 没有现成的写 16 位函数，手写两行

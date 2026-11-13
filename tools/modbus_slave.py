@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ──────────────────────────────────────────────────────────────────────────────
-# modbus_slave.py - Modbus TCP 从站模拟器（开发调试用，不属于产品代码）
+# modbus_slave_sim.py - Modbus TCP 从站模拟器（开发调试用，不属于产品代码）
 #
 # 它是什么：
 #   一个假装成"现场设备"的小程序。SensorHub 用 --modbus 启动时，会像对待真实
@@ -11,9 +11,9 @@
 #   两者通过 127.0.0.1:502 通信，和真实机房里设备与上位机的关系一模一样。
 #
 # 点表必须和 src/data/ModbusProducer.cpp 里的 kPoints 保持一致：
-#   寄存器 0/1/2 = rack1 温度/湿度/电压
-#   寄存器 3/4/5 = rack2 温度/湿度/电压
-#   寄存器 6/7/8 = rack3 温度/湿度/电压
+#   寄存器 0/1/2 = rack01 温度/湿度/电压
+#   寄存器 3/4/5 = rack02 温度/湿度/电压
+#   寄存器 6/7/8 = rack03 温度/湿度/电压
 #   寄存器里存的是"实际值 ×10"，245 表示 24.5℃
 #
 # 用法：
@@ -23,7 +23,7 @@
 #
 #   另开一个终端运行 SensorHub：--modbus 127.0.0.1:502
 #
-# 控制台命令（可随时改设备的值，模拟现场环境变化）：
+# 控制台命令（出现 "> " 提示符后再输入）：
 #   list            查看当前 9 个寄存器
 #   set 0 400       把 0 号寄存器改成 400（rack01 温度变成 40.0℃）
 #   quit            退出
@@ -32,6 +32,8 @@
 import argparse
 import asyncio
 import sys
+import threading
+import time
 
 from pymodbus.server import StartAsyncTcpServer
 from pymodbus.simulator import DataType, SimData, SimDevice
@@ -41,19 +43,19 @@ SCALE = 10.0     # 寄存器值 ÷ 10 = 实际值
 
 # (测点名称, 单位, 初始寄存器值)
 POINTS = [
-    ("rack1 温度", "°C", 245),
-    ("rack1 湿度", "%RH", 505),
-    ("rack1 电压", "V", 2200),
-    ("rack2 温度", "°C", 240),
-    ("rack2 湿度", "%RH", 480),
-    ("rack2 电压", "V", 2210),
-    ("rack3 温度", "°C", 250),
-    ("rack3 湿度", "%RH", 520),
-    ("rack3 电压", "V", 2195),
+    ("rack01 温度", "°C", 245),
+    ("rack01 湿度", "%RH", 505),
+    ("rack01 电压", "V", 2200),
+    ("rack02 温度", "°C", 240),
+    ("rack02 湿度", "%RH", 480),
+    ("rack02 电压", "V", 2210),
+    ("rack03 温度", "°C", 250),
+    ("rack03 湿度", "%RH", 520),
+    ("rack03 电压", "V", 2195),
 ]
 
 # pymodbus 启动时会把寄存器复制一份自己的内存，改 SimData 里的列表没用。
-# 这里借"收到请求"这个回调拿到那份正在使用的内存地址，后面才能改值。
+# 这里借"收到请求"这个回调拿到那份正在使用的内存，后面才能改值。
 state = {"regs": None}
 
 
@@ -73,21 +75,18 @@ def print_table(regs):
         print(f"   {i}    {name:<10}  {raw:>6}   {raw / SCALE:>6.1f} {unit}")
     if regs is None:
         print("  （客户端还没连上，上面显示的是初始值）")
-    print()
+    print(flush=True)
 
 
-async def console_loop():
-    loop = asyncio.get_running_loop()
-    print("\n就绪。命令：list / set <编号> <原始值> / quit")
+def console_loop():
+    """主线程里用阻塞式 input() 读控制台。
+
+    早先版本把 input 放进 asyncio 的线程池里跑，在部分终端下会立刻读到 EOF，
+    表现为"能打印日志但打不了字"。改成主线程阻塞读之后，任何终端都正常。
+    """
+    print("\n可以输入命令了：list / set <编号> <原始值> / quit", flush=True)
     while True:
-        line = (await loop.run_in_executor(None, sys.stdin.readline))
-        if line == "":
-            # 输入流结束（比如在后台运行、没有控制台）。不再接收命令，
-            # 但服务器要继续跑，否则程序会直接退出。
-            print("\n控制台不可用，进入只读模式（Ctrl+C 退出）")
-            await asyncio.Event().wait()
-            return
-        line = line.strip()
+        line = input("> ").strip()
         if not line:
             continue
 
@@ -123,7 +122,12 @@ async def console_loop():
             print("未知命令。可用：list / set <编号> <原始值> / quit")
 
 
-async def main(args):
+def run_server(device, host, port):
+    """在后台线程里跑 asyncio 事件循环，主线程专心处理控制台输入。"""
+    asyncio.run(StartAsyncTcpServer(context=device, address=(host, port)))
+
+
+def main(args):
     holding = SimData(
         address=0,
         count=len(POINTS),
@@ -137,17 +141,22 @@ async def main(args):
           f"（从站号 {SLAVE_ID}，{len(POINTS)} 个保持寄存器）")
     print(f"SensorHub 连接参数：--modbus 127.0.0.1:{args.port}")
 
-    server = asyncio.create_task(
-        StartAsyncTcpServer(context=device, address=(args.host, args.port)))
-    console = asyncio.create_task(console_loop())
+    threading.Thread(target=run_server,
+                     args=(device, args.host, args.port),
+                     daemon=True).start()
 
-    done, _ = await asyncio.wait({server, console},
-                                 return_when=asyncio.FIRST_COMPLETED)
-    for task in done:
-        if task.exception():
-            print("出错了：", task.exception())
-    for task in (server, console):
-        task.cancel()
+    try:
+        console_loop()
+    except EOFError:
+        print("\n控制台不可用（stdin 已关闭），服务器继续运行，按 Ctrl+C 退出",
+              flush=True)
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            pass
+    except KeyboardInterrupt:
+        print("\n已退出", flush=True)
 
 
 if __name__ == "__main__":
@@ -160,7 +169,4 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
 
-    try:
-        asyncio.run(main(arguments))
-    except KeyboardInterrupt:
-        print("\n已退出")
+    main(arguments)
