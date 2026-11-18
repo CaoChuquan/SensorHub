@@ -26,6 +26,9 @@ public:
 
     void start() override;
     void stop() override;
+
+    // 供界面显示"数据从哪来"
+    QString sourceDescription() const override;
 private slots:
     void onPollTick();        // 每秒触发：该发下一条请求了
     void onConnected();       // 连上设备：立刻发第一帧 

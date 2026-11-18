@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 class QTabWidget;
+class QLabel;
 
 namespace sensorhub {
 
@@ -20,8 +21,11 @@ public:
                         ChartService& chartService,
                         AlarmService& alarmService,
                         QWidget* parent = nullptr);
+
+    void setDataSourceLabel(const QString& lable);
 private:
-    QTabWidget* tabs_ = nullptr;
+    QTabWidget* tabs_ = nullptr;       // 多页容器，每个功能一个 tab
+    QLabel* sourceLabel_ = nullptr;    // 右下角状态栏，显示数据源
 };
 
 } // namespace sensorhub

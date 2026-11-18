@@ -16,6 +16,9 @@ public:
 
     virtual void start() = 0;
     virtual void stop() = 0;
+
+    // 给界面显示数据从哪里来
+    virtual QString sourceDescription() const = 0;
 signals:
     void newReading(const SensorReading& reading);
 };

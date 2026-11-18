@@ -100,6 +100,9 @@ int main(int argc, char* argv[]) {
         qInfo() << "数据源：Modbus TCP" << host << port;
     }
 
+    // 告诉界面数据的来源
+    window.setDataSourceLabel(producer->sourceDescription());    
+
     QObject::connect(producer.get(), &ISensorProducer::newReading,
                      &hub, &DataHub::publish);
 

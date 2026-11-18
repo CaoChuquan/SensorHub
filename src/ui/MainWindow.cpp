@@ -7,6 +7,7 @@
 #include "ui/AlarmScreen.h"
 #include <QTabWidget>
 #include <QStringLiteral>
+#include <QStatusBar>
 
 namespace sensorhub {
 
@@ -30,8 +31,15 @@ MainWindow::MainWindow(DataHub& hub, WatchlistService& wl_service,
     tabs_->addTab(new ChartScreen(chartService, tabs_), QStringLiteral("时序图"));
     // 告警页面
     tabs_->addTab(new AlarmScreen(alarmService, tabs_), QStringLiteral("告警面板")); 
-
     setCentralWidget(tabs_);
+
+    // 状态栏：显示数据来源
+    sourceLabel_ = new QLabel(this);
+    statusBar()->addPermanentWidget(sourceLabel_);
+}
+
+void MainWindow::setDataSourceLabel(const QString& label) {
+    sourceLabel_->setText(QStringLiteral("数据源：") + label);
 }
 
 } // namespace sensorhub

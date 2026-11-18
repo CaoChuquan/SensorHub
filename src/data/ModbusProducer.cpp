@@ -195,4 +195,19 @@ void ModbusProducer::onRequestTimeout() {
     socket_.abort();    // 下一次轮询会自动连接
 }
 
+QString ModbusProducer::sourceDescription() const {
+    const QString address = QStringLiteral("%1:%2").arg(host_).arg(port_);
+
+    // Modbus 协议本身没有"我是模拟器"这种标记，程序无法真正分辨
+    // 网线那头是一台真仪表还是模拟器，这里只能按地址推断：
+    //   回环地址（127.0.0.1 / localhost / ::1）-> 基本可以认定是本机模拟器
+    //   其他地址 -> 当作网络上的设备（可能是真表，也可能是别的机器上的模拟器）
+    if (host_ == QLatin1String("127.0.0.1")
+        || host_ == QLatin1String("localhost")
+        || host_ == QLatin1String("::1")) {
+        return QStringLiteral("Modbus 本机模拟设备（%1）").arg(address);
+    }
+    return QStringLiteral("Modbus 网络设备（%1）").arg(address);
+}
+
 } // namespace sensorhub
