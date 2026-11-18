@@ -62,6 +62,13 @@ ModbusProducer::ModbusProducer(QString host, quint16 port, QObject* parent)
             this, &ModbusProducer::onReadyRead);
     connect(&socket_, &QTcpSocket::disconnected,
             this, &ModbusProducer::onDisconnected);
+    connect(&socket_, &QAbstractSocket::errorOccurred,
+        this, [this](QAbstractSocket::SocketError) {
+            if (stopRequested_) return;
+            qWarning() << "[ModbusProducer] 连接失败：" << socket_.errorString();
+            emit linkStateChanged(false,
+                QStringLiteral("连接失败，正在重连"));
+        });
 }
 
 void ModbusProducer::start() {
@@ -77,10 +84,12 @@ void ModbusProducer::stop() {
     timeoutTimer_.stop();
     awaitingReply_ = false;
     socket_.abort();
+    emit linkStateChanged(false, QStringLiteral("采集已停止"));
 }
 
 void ModbusProducer::onConnected() {
     qInfo() << "[ModbusProducer] 已连接" << host_ << port_;
+    emit linkStateChanged(true, QStringLiteral("已连接 %1:%2").arg(host_).arg(port_));
     // 连接后立刻要一次数据
     sendReadRequest();    
 }
@@ -181,6 +190,7 @@ void ModbusProducer::onDisconnected() {
     resetPending();
     if (!stopRequested_) {
         qWarning() << "[ModbusProducer] 连接断开，下一秒自动重连";
+        emit linkStateChanged(false, QStringLiteral("连接断开，正在重连"));
     }
 }
 
@@ -192,6 +202,7 @@ void ModbusProducer::resetPending() {
 void ModbusProducer::onRequestTimeout() {
     qWarning() << "[ModbusProducer] 设备一秒内没回包，断开连接";
     awaitingReply_ = false;
+    emit linkStateChanged(false, QStringLiteral("设备无响应，正在重连"));
     socket_.abort();    // 下一次轮询会自动连接
 }
 

@@ -22,10 +22,14 @@ public:
                         AlarmService& alarmService,
                         QWidget* parent = nullptr);
 
+    // 在状态栏显示“数据从哪来”
     void setDataSourceLabel(const QString& lable);
+    // 在状态栏显示采集链路是否正常
+    void setLinkState(bool online, const QString& reason);    
 private:
     QTabWidget* tabs_ = nullptr;       // 多页容器，每个功能一个 tab
     QLabel* sourceLabel_ = nullptr;    // 右下角状态栏，显示数据源
+    QLabel* linkLabel_ = nullptr;      // 状态栏的"采集状态"标签
 };
 
 } // namespace sensorhub

@@ -33,6 +33,9 @@ MainWindow::MainWindow(DataHub& hub, WatchlistService& wl_service,
     tabs_->addTab(new AlarmScreen(alarmService, tabs_), QStringLiteral("告警面板")); 
     setCentralWidget(tabs_);
 
+    // 状态栏：显示："采集：正常/中断" 
+    linkLabel_ = new QLabel(this);
+    statusBar()->addPermanentWidget(linkLabel_);
     // 状态栏：显示数据来源
     sourceLabel_ = new QLabel(this);
     statusBar()->addPermanentWidget(sourceLabel_);
@@ -40,6 +43,17 @@ MainWindow::MainWindow(DataHub& hub, WatchlistService& wl_service,
 
 void MainWindow::setDataSourceLabel(const QString& label) {
     sourceLabel_->setText(QStringLiteral("数据源：") + label);
+}
+
+void MainWindow::setLinkState(bool online, const QString& reason) {
+    if (online) {
+        linkLabel_->setText(QStringLiteral("采集：正常"));
+        linkLabel_->setStyleSheet(QStringLiteral("color:#2e7d32;"));
+    } 
+    else {
+        linkLabel_->setText(QStringLiteral("采集：中断（%1）").arg(reason));
+        linkLabel_->setStyleSheet(QStringLiteral("color:#c62828; font-weight:bold;"));
+    }
 }
 
 } // namespace sensorhub

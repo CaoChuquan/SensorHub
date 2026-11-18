@@ -32,8 +32,15 @@ SimulationProducer::SimulationProducer(QObject* parent) : ISensorProducer(parent
     connect(&timer_, &QTimer::timeout, this, &SimulationProducer::produceTick);
 }
 
-void SimulationProducer::start() { timer_.start(); }
-void SimulationProducer::stop() { timer_.stop(); }
+void SimulationProducer::start() {
+    timer_.start();
+    emit linkStateChanged(true, QStringLiteral("仿真数据源运行中"));
+}
+
+void SimulationProducer::stop() {
+    timer_.stop();
+    emit linkStateChanged(false, QStringLiteral("采集已停止"));
+}
 
 void SimulationProducer::produceTick() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();

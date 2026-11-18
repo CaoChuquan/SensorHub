@@ -21,6 +21,11 @@ public:
     virtual QString sourceDescription() const = 0;
 signals:
     void newReading(const SensorReading& reading);
+
+    // 采集链路是否正常，变了就发一次此信号
+    //   online=true  ：连上了 / 正在正常出数据
+    //   online=false ：断了，reason 里写原因
+    void linkStateChanged(bool online, const QString& reason);
 };
 
 } // namespace sensorhub

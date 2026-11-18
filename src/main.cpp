@@ -106,6 +106,9 @@ int main(int argc, char* argv[]) {
     QObject::connect(producer.get(), &ISensorProducer::newReading,
                      &hub, &DataHub::publish);
 
+    QObject::connect(producer.get(), &ISensorProducer::linkStateChanged,
+                     &window, &MainWindow::setLinkState);
+
     // 启动生产者和窗口
     producer->start();
     window.show();
