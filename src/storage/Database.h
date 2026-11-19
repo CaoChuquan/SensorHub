@@ -11,7 +11,7 @@ public:
     Database() = default;
 
     // 打开或创建数据库文件
-    bool open();
+    bool open(const QString& filePath = QString());
 
     QString lastError() const { return last_error_; }
     QString filePath() const { return file_path_; }

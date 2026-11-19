@@ -6,13 +6,28 @@
 
 namespace sensorhub {
 
-bool Database::open() {
-    // 数据库文件暂时放在与可执行文件同目录下的 temp_database 目录下
-    const QString dir = QCoreApplication::applicationDirPath() + QStringLiteral("/temp_database");
-    QDir().mkpath(dir);  // 创建目录
-    file_path_ = dir + QStringLiteral("/sensorhub.db");
+bool Database::open(const QString& filePath) {
+    // 不传路径时用默认位置：exe 旁的 data/ 下，开发期直观可见、随手可删可备份
+    // 传路径是给单元测试用的——每个用例一个临时库，互不干扰
+    if (filePath.isEmpty()) {
+        const QString dir = QCoreApplication::applicationDirPath() + QStringLiteral("/data");
+        QDir().mkpath(dir);
+        file_path_ = dir + QStringLiteral("/sensorhub.db");
+    }
+    else {
+        file_path_ = filePath;
+    }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("sensorhub"));
+    // 同名连接已存在时先摘掉，否则 addDatabase 会提示"重复连接名"
+    // 并沿用旧连接，导致新路径被忽略
+    // 测试里每个用例都新建一个库
+    const QString connName = QStringLiteral("sensorhub");
+    if (QSqlDatabase::contains(connName)) {
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    // 显式连接名：不依赖 Qt 的"默认连接"魔法，多连接时不会串
+    QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
     db.setDatabaseName(file_path_);
     if (!db.open()) {
         last_error_ = db.lastError().text();

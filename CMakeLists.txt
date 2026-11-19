@@ -10,10 +10,10 @@ set(CMAKE_AUTOMOC ON)
 # 生成 <构建目录>/compile_commands.json，供编辑器做 IntelliSense
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# 寻找 Qt 与Sql 模块（SQLite 存档）
-find_package(Qt6 COMPONENTS Widgets Sql Charts Network QUIET)
+# 寻找 Qt 与 Sql 模块（SQLite 存档）
+find_package(Qt6 COMPONENTS Widgets Sql Charts Network Test QUIET)
 if(NOT Qt6_FOUND)
-    find_package(Qt5 COMPONENTS Widgets Sql Charts Network REQUIRED)
+    find_package(Qt5 COMPONENTS Widgets Sql Charts Network Test REQUIRED)
     set(QT_LIB_PREFIX Qt5)
 else()
     set(QT_LIB_PREFIX Qt6)
@@ -80,3 +80,7 @@ target_link_libraries(SensorHub PRIVATE
     ${QT_LIB_PREFIX}::Widgets
     ${QT_LIB_PREFIX}::Charts
 )
+
+# 单元测试
+enable_testing()
+add_subdirectory(test)
