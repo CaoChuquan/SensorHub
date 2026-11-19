@@ -47,7 +47,7 @@ void MainWindow::setDataSourceLabel(const QString& label) {
 
 void MainWindow::setLinkState(bool online, const QString& reason) {
     if (online) {
-        linkLabel_->setText(QStringLiteral("采集：正常"));
+        linkLabel_->setText(QStringLiteral("采集：正常 "));
         linkLabel_->setStyleSheet(QStringLiteral("color:#2e7d32;"));
     } 
     else {
