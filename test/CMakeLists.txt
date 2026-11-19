@@ -8,3 +8,17 @@ target_link_libraries(tst_alarm PRIVATE
     ${QT_LIB_PREFIX}::Test
 )
 add_test(NAME tst_alarm COMMAND tst_alarm)
+
+add_executable(tst_analysis tst_analysis.cpp)
+target_link_libraries(tst_analysis PRIVATE
+    sensorhub_core
+    ${QT_LIB_PREFIX}::Test
+)
+add_test(NAME tst_analysis COMMAND tst_analysis)
+
+add_executable(tst_storage tst_storage.cpp)
+target_link_libraries(tst_storage PRIVATE
+    sensorhub_core
+    ${QT_LIB_PREFIX}::Test
+)
+add_test(NAME tst_storage COMMAND tst_storage)

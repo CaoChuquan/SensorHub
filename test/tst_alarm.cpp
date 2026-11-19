@@ -6,7 +6,6 @@
   然后检查数据库里生成了几条事件、状态是什么
 */
 #include <QTest>
-#include <QTemporaryDir>
 
 #include "core/DataHub.h"
 #include "data/AlarmTypes.h"
@@ -40,14 +39,17 @@ private slots:
 
     // 用例 1：从正常变成超标，应该产生且只产生 1 条事件
     void firstViolationProducesOneEvent();
-
     // 用例 2：持续超标（连续多条读数），不应该重复报警
     void continuousViolationDoesNotRepeat();
-
     // 用例 3：恢复正常后，事件应被自动标记为"已恢复"
     void recoveryResolvesEvent();
+    // 用例 4：确认之后读数仍在超标，不应再产生新事件
+    void acknowledgeDoesNotRetrigger();
+    // 用例 5：重启后若仍在超标，不应把同一次故障当成新警再报一遍
+    void restartRestoresViolationState();
+    // 用例 6：停用规则时，它名下未结束的事件应一起收尾
+    void disablingRuleResolvesItsEvents();
 private:
-    QTemporaryDir tmpDir_;
     Database* db_ = nullptr;
     DataHub* hub_ = nullptr;
     AlarmService* service_ = nullptr;
@@ -57,12 +59,10 @@ private:
 void TstAlarm::init() {
     now_ = 1000;
 
-    // 每个用例一个独立的库文件，互不影响，也不会碰到开发用的 sensorhub.db
-    const QString dbPath = tmpDir_.filePath(
-        QStringLiteral("%1.db").arg(QString::fromLatin1(QTest::currentTestFunction())));
-
+    // 内存库：每个用例一开一关，互不影响，也不会碰到开发用的 sensorhub.db
+    // 注意":memory:" 的库随连接存在，所以"重启恢复"用例只重建服务、不重建 Database
     db_ = new Database;
-    QVERIFY2(db_->open(dbPath), qPrintable(db_->lastError()));
+    QVERIFY2(db_->open(QStringLiteral(":memory:")), qPrintable(db_->lastError()));
 
     hub_ = new DataHub;
     service_ = new AlarmService(*db_, *hub_);
@@ -127,6 +127,66 @@ void TstAlarm::recoveryResolvesEvent() {
     QCOMPARE(static_cast<int>(events.first().state),
              static_cast<int>(AlarmState::resolved));
     QVERIFY(events.first().resolvedAtMs > 0);
+}
+
+void TstAlarm::acknowledgeDoesNotRetrigger() {
+    QVERIFY(service_->addRule(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              30.0, AlarmDirection::above));
+
+    hub_->publish(makeReading(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              35.0, now_ += 1000));
+
+    QVector<AlarmEvent> events = service_->recentEvents(10);
+    QCOMPARE(events.size(), 1);
+    QVERIFY(service_->acknowledge(events.first().id));
+
+    // 人点了"确认"，但温度还没降下来：此时不应该再报一条新警
+    hub_->publish(makeReading(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              36.0, now_ += 1000));
+
+    events = service_->recentEvents(10);
+    QCOMPARE(events.size(), 1);
+    QCOMPARE(static_cast<int>(events.first().state),
+             static_cast<int>(AlarmState::acknowledged));
+}
+
+void TstAlarm::restartRestoresViolationState() {
+    QVERIFY(service_->addRule(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              30.0, AlarmDirection::above));
+    hub_->publish(makeReading(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              35.0, now_ += 1000));
+    QCOMPARE(service_->recentEvents(10).size(), 1);
+
+    // 模拟程序重启：服务与 hub 全部重建，只保留数据库
+    delete service_;
+    service_ = nullptr;
+    delete hub_;
+    hub_ = nullptr;
+    hub_ = new DataHub;
+    service_ = new AlarmService(*db_, *hub_);
+
+    // 重启后温度仍超标。若没从库里恢复"正在越限"的记忆，这里会再报一条。
+    hub_->publish(makeReading(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              36.0, now_ += 1000));
+
+    QCOMPARE(service_->recentEvents(10).size(), 1);
+}
+
+void TstAlarm::disablingRuleResolvesItsEvents() {
+    QVERIFY(service_->addRule(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              30.0, AlarmDirection::above));
+    hub_->publish(makeReading(QStringLiteral("rack1"), QStringLiteral("temperature"),
+                              35.0, now_ += 1000));
+
+    const QVector<AlarmRule> rules = service_->rules();
+    QCOMPARE(rules.size(), 1);
+    QVERIFY(service_->setRuleEnabled(rules.first().id, false));
+
+    // 规则停用等于"别再盯这个点了"，它名下还挂着的告警不该永远停在"未处理"
+    const QVector<AlarmEvent> events = service_->recentEvents(10);
+    QCOMPARE(events.size(), 1);
+    QCOMPARE(static_cast<int>(events.first().state),
+             static_cast<int>(AlarmState::resolved));
 }
 
 QTEST_GUILESS_MAIN(TstAlarm)
