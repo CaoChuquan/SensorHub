@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test (MinGW)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 取出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.1'
+          arch: 'win64_mingw'
+          tools: 'qt.tools.win64_mingw1310'
+          cache: true
+
+      - name: 配置
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: 编译
+        run: cmake --build build
+
+      - name: 跑测试
+        run: ctest --test-dir build --output-on-failure
