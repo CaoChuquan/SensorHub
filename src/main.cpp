@@ -1,22 +1,24 @@
+#include <memory>
 #include <QApplication>
 #include <QDebug>
 #include <QStringLiteral>
 #include <QCommandLineParser>
-#include <memory>
 
 #include "core/DataHub.h"
 #include "data/SensorTypes.h"
 #include "data/SimulationProducer.h"
 #include "data/AlarmTypes.h"
 #include "data/ISensorProducer.h"
-#include "services/SensorArchiveService.h"
+#include "data/DeviceConfig.h"
+#include "data/DeviceConfigLoader.h"
+#include "data/ModbusProducer.h"
 #include "storage/Database.h"
 #include "ui/MainWindow.h"
 #include "services/WatchlistService.h"
 #include "services/AnalysisService.h"
 #include "services/ChartService.h"
 #include "services/AlarmService.h"
-#include "data/ModbusProducer.h"
+#include "services/SensorArchiveService.h"
 
 using namespace sensorhub;
 
@@ -34,9 +36,9 @@ int main(int argc, char* argv[]) {
     parser.addVersionOption();
     QCommandLineOption modbusOption(
         QStringLiteral("modbus"),
-        QStringLiteral("从 Modbus TCP 设备采集数据，格式 IP[:端口]，默认端口 502"
-                       "不填则使用仿真数据"),
-        QStringLiteral("地址"));
+        QStringLiteral("从 Modbus TCP 设备采集数据。可跟地址 IP[:端口]（默认 502），"
+                       "省略时使用 config/devices.json 里的地址。"
+                       "不填该参数则使用仿真数据。"));
     parser.addOption(modbusOption);
     parser.process(app);
 
@@ -78,26 +80,47 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<ISensorProducer> producer = 
         std::make_unique<SimulationProducer>();
 
-    const QString modbusAddress = parser.value(modbusOption).trimmed(); 
-    if (modbusAddress.isEmpty()) {
+    if (!parser.isSet(modbusOption)) {
         producer = std::make_unique<sensorhub::SimulationProducer>();
         qInfo() << "数据源：仿真（未指定 --modbus）";
     } 
     else {
-        // 支持 "192.168.1.100" 和 "192.168.1.100:1502" 两种写法
-        QString host = modbusAddress;
-        quint16 port = 502;
-        const int colon = host.lastIndexOf(QLatin1Char(':'));
-        if (colon > 0) {
-            bool ok = false;
-            const uint parsed = host.mid(colon + 1).toUInt(&ok);
-            if (ok && parsed > 0 && parsed <= 65535) {
-                port = static_cast<quint16>(parsed);
-                host = host.left(colon);
+        // 设备表优先从 exe 旁的 config/devices.json 读（构建时会自动复制过去）；
+        // 文件缺失或写错时回退到内置默认配置，保证程序仍然能跑。
+        const QString configPath =
+            QCoreApplication::applicationDirPath() + QStringLiteral("/config/devices.json");
+        QString configError;
+        QVector<sensorhub::DeviceConfig> devices =
+            sensorhub::DeviceConfigLoader::loadFromFile(configPath, &configError);
+        if (devices.isEmpty()) {
+            qWarning().noquote() << "设备表加载失败：" << configError
+                                 << "，改用内置默认配置";
+            devices = sensorhub::DeviceConfigLoader::defaults();
+        }
+
+        // 地址可以写在配置里，也可以在命令行临时覆盖
+        const QString modbusAddress = parser.positionalArguments().value(0).trimmed();
+        if (!modbusAddress.isEmpty()) {
+            QString host = modbusAddress;
+            quint16 port = 502;
+            const int colon = host.lastIndexOf(QLatin1Char(':'));
+            if (colon > 0) {
+                bool ok = false;
+                const uint parsed = host.mid(colon + 1).toUInt(&ok);
+                if (ok && parsed > 0 && parsed <= 65535) {
+                    port = static_cast<quint16>(parsed);
+                    host = host.left(colon);
+                }
+            }
+            for (sensorhub::DeviceConfig& device : devices) {
+                device.host = host;
+                device.port = port;
             }
         }
-        producer = std::make_unique<sensorhub::ModbusProducer>(host, port);
-        qInfo() << "数据源：Modbus TCP" << host << port;
+
+        qInfo() << "数据源：Modbus TCP" << devices.first().host
+                << devices.first().port << "，共" << devices.size() << "台设备";
+        producer = std::make_unique<sensorhub::ModbusProducer>(devices);
     }
 
     // 告诉界面数据的来源

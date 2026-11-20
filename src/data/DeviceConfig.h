@@ -20,7 +20,7 @@ struct DeviceConfig {
     QString name;              // 机柜标识，会直接作为 SensorReading::sensorId
     QString host;              // 从站所在设备的 IP（同一网关下挂多台时 IP 相同）
     quint16 port = 502;        // Modbus TCP 标准端口
-    int unitId = 1;            // 从站号 1..247，同一 IP 下靠它区分不同机柜
+    int unitId = 1;            // 从站号，同一 IP 下靠它区分不同机柜
     QVector<DevicePoint> points;
 };
 

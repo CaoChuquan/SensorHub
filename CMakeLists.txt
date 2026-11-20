@@ -82,6 +82,14 @@ target_link_libraries(SensorHub PRIVATE
     ${QT_LIB_PREFIX}::Charts
 )
 
+# devices.json 随程序一起复制到产物目录
+# 改 JSON 不用重新编译代码，重新构建一次（或手动复制）即可
+add_custom_command(TARGET SensorHub POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/config
+        $<TARGET_FILE_DIR:SensorHub>/config
+)
+
 # 单元测试
 enable_testing()
 add_subdirectory(test)

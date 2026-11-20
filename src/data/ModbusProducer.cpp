@@ -6,26 +6,10 @@ namespace sensorhub {
 
 namespace {
 
-constexpr int kPollIntervalMs = 1000;   // 每秒采集一次
-constexpr int kReplyTimeoutMs = 1000;   // 每超过一秒没回包就认为设备失联
-
-constexpr quint8 kFuncReadHolding = 0x03; // 功能码 03：读保持寄存器
-constexpr double kScale = 10.0;           // 寄存器存的是实际值 ×10
-
-// 点表：第几个寄存器对应哪个机柜的哪个指标
-struct Point {
-    const char* sensorId;
-    const char* type;
-};
-
-// 点表：第几个寄存器对应哪个机柜的哪个指标。
-// 注意 sensorId 必须和 SensorScreen 里的 kRackIds 完全一致（rack1/rack2/rack3），
-// 否则界面按 ID 找不到对应行，会把读数直接忽略——表现为"终端在动、界面不动"。
-const Point kPoints[ModbusProducer::kRegisterCount] = {
-    {"rack1", "temperature"}, {"rack1", "humidity"}, {"rack1", "voltage"},
-    {"rack2", "temperature"}, {"rack2", "humidity"}, {"rack2", "voltage"},
-    {"rack3", "temperature"}, {"rack3", "humidity"}, {"rack3", "voltage"},
-};
+constexpr int kPollIntervalMs = 1000;      // 每秒开始一轮
+constexpr int kReplyTimeoutMs = 500;       // 单台设备最多等 500 毫秒
+constexpr int kMaxRegistersPerRead = 125;  // Modbus 单次读寄存器的上限
+constexpr quint8 kFuncReadHolding = 0x03;  // 功能码 03：读保持寄存器
 
 // Modbus 规定多字节数字"高位在前"，Qt 没有现成的写 16 位函数，手写两行
 void appendU16(QByteArray& out, quint16 value) {
@@ -41,40 +25,62 @@ quint16 readU16(const QByteArray& data, int offset) {
 
 } // namespace
 
-ModbusProducer::ModbusProducer(QString host, quint16 port, QObject* parent) 
-    : ISensorProducer(parent), host_(host), port_(port)
+ModbusProducer::ModbusProducer(QVector<DeviceConfig> devices, QObject* parent)
+    : ISensorProducer(parent), devices_(std::move(devices)) 
 {
-    // 设置采集时间间隔
-    pollTimer_.setInterval(kPollIntervalMs);
-    // 连接 timeout 信号
-    connect(&pollTimer_, &QTimer::timeout,
-            this, &ModbusProducer::onPollTick);
 
-    timeoutTimer_.setSingleShot(true);   // 设置 timeoutTimer_ 计时器只响应一次
+    if (!devices_.isEmpty()) {
+        host_ = devices_.first().host;
+        port_ = devices_.first().port;
+
+        // 当前实现只支持"一台网关下挂多台从站"。
+        // 如果设备表里写了不同 IP，提示当前只支持同一网关
+        for (const DeviceConfig& device : devices_) {
+            if (device.host != host_ || device.port != port_) {
+                qWarning() << "[ModbusProducer] 设备" << device.name
+                           << "配置的地址与第一台不同，当前只支持同一网关，"
+                           << "将统一使用" << host_ << port_;
+            }
+        }
+    }
+
+    pollTimer_.setInterval(kPollIntervalMs);
+    connect(&pollTimer_, &QTimer::timeout, this, &ModbusProducer::onPollTick);
+
+    timeoutTimer_.setSingleShot(true);
     timeoutTimer_.setInterval(kReplyTimeoutMs);
     connect(&timeoutTimer_, &QTimer::timeout,
             this, &ModbusProducer::onRequestTimeout);
-    
-    // 连接 QTcpSocket 相关信号
-    connect(&socket_, &QTcpSocket::connected, 
+
+    connect(&socket_, &QTcpSocket::connected,
             this, &ModbusProducer::onConnected);
     connect(&socket_, &QTcpSocket::readyRead,
             this, &ModbusProducer::onReadyRead);
     connect(&socket_, &QTcpSocket::disconnected,
             this, &ModbusProducer::onDisconnected);
+
+    // 连接失败（对方没开、地址不对、网线拔了）连接的是 errorOccurred，
+    // 而不是 disconnected，因为从头到尾就没连上过，Qt 不会发 disconnected
     connect(&socket_, &QAbstractSocket::errorOccurred,
-        this, [this](QAbstractSocket::SocketError) {
-            if (stopRequested_) return;
-            qWarning() << "[ModbusProducer] 连接失败：" << socket_.errorString();
-            emit linkStateChanged(false,
-                QStringLiteral("连接失败，正在重连"));
-        });
+            this, [this](QAbstractSocket::SocketError) {
+                if (stopRequested_) return;
+                qWarning() << "[ModbusProducer] 连接失败：" << socket_.errorString();
+                emit linkStateChanged(false,
+                    QStringLiteral("连接失败，正在重连"));
+            });
 }
 
 void ModbusProducer::start() {
     stopRequested_ = false;
+
+    if (devices_.isEmpty()) {
+        qWarning() << "[ModbusProducer] 设备表是空的，不会采集任何数据";
+        emit linkStateChanged(false, QStringLiteral("设备表为空"));
+        return;
+    }
+
     pollTimer_.start();
-    // 发起连接
+    // 连接是异步的：这里只是"发起连接"，连上之后会触发 onConnected
     socket_.connectToHost(host_, port_);
 }
 
@@ -83,27 +89,35 @@ void ModbusProducer::stop() {
     pollTimer_.stop();
     timeoutTimer_.stop();
     awaitingReply_ = false;
+    pendingDeviceIndex_ = -1;
     socket_.abort();
     emit linkStateChanged(false, QStringLiteral("采集已停止"));
 }
 
 void ModbusProducer::onConnected() {
-    qInfo() << "[ModbusProducer] 已连接" << host_ << port_;
+    qInfo() << "[ModbusProducer] 已连接" << host_ << port_
+            << "，共" << devices_.size() << "台设备";
     emit linkStateChanged(true, QStringLiteral("已连接 %1:%2").arg(host_).arg(port_));
-    // 连接后立刻要一次数据
-    sendReadRequest();    
+    beginRound(); // 不等下一秒，立刻读一轮  
 }
 
-void ModbusProducer::sendReadRequest() {
+void ModbusProducer::sendReadRequest(int deviceIndex, int firstRegister, int count) {
+    const DeviceConfig& device = devices_.at(deviceIndex);
+
     QByteArray frame;
     const quint16 transactionId = nextTransactionId_++;
     appendU16(frame, transactionId); // 事务号：用来把回包和请求对上
     appendU16(frame, 0);             // 协议号，Modbus 固定 0
     appendU16(frame, 6);             // 长度：从站号 1 字节 + PDU 5 字节
-    frame.append(static_cast<char>(1));                // 从站号（设备默认 1）
+    frame.append(static_cast<char>(device.unitId));    // 从站号：区分同一网关下的机柜
     frame.append(static_cast<char>(kFuncReadHolding)); // 功能码 03
-    appendU16(frame, 0);              // 起始地址
-    appendU16(frame, kRegisterCount); // 读几个
+    appendU16(frame, static_cast<quint16>(firstRegister)); // 起始地址
+    appendU16(frame, static_cast<quint16>(count));         // 读几个
+
+    pendingTransactionId_ = transactionId;
+    pendingDeviceIndex_ = deviceIndex;
+    pendingFirstRegister_ = firstRegister;
+    pendingCount_ = count;
 
     awaitingReply_ = true;
     timeoutTimer_.start();
@@ -122,7 +136,46 @@ void ModbusProducer::onPollTick() {
         return;
     }
 
-    sendReadRequest();
+    beginRound();
+}
+
+void ModbusProducer::beginRound() {
+    nextDeviceIndex_ = 0;
+    sendNextRequest();
+}
+
+void ModbusProducer::sendNextRequest() {
+    // 顺着设备表往下找，直到找到一台能读的；读完就结束本轮，等下一秒
+    while (nextDeviceIndex_ < devices_.size()) {
+        const int index = nextDeviceIndex_++;
+        const DeviceConfig& device = devices_.at(index);
+
+        if (device.points.isEmpty()) {
+            qWarning() << "[ModbusProducer] 设备" << device.name << "没有采集点，跳过";
+            continue;
+        }
+
+        // 点表里的寄存器可能不连续，这里读"最小到最大"的整段，
+        // 再把用到的位置取出来，避免一台设备发好几条请求
+        int first = std::numeric_limits<int>::max();
+        int last = std::numeric_limits<int>::min();
+        for (const DevicePoint& point : device.points) {
+            first = std::min(first, point.registerAddress);
+            last = std::max(last, point.registerAddress);
+        }
+        const int count = last - first + 1;
+
+        if (count <= 0 || count > kMaxRegistersPerRead) {
+            qWarning() << "[ModbusProducer] 设备" << device.name
+                       << "的寄存器范围不合法（" << first << "-" << last
+                       << "），跳过";
+            continue;
+        }
+
+        sendReadRequest(index, first, count);
+        return;
+    }
+    // 本轮所有设备都读完了，等下一个 tick
 }
 
 void ModbusProducer::onReadyRead() {
@@ -143,67 +196,89 @@ void ModbusProducer::handleFrame(const QByteArray& frame) {
     // 最短也要有：MBAP 头 7 字节 + 功能码 1 字节 + 字节数 1 字节
     if (frame.size() < 9) {
         qWarning() << "[ModbusProducer] 回包太短，丢弃";
-        resetPending();
+        finishRequest();
         return;
     }
 
+    const quint16 transactionId = readU16(frame, 0);
     const quint16 protocolId = readU16(frame, 2);
-    const quint8 functionCode = static_cast<quint8>(frame[7]);
+
+    // 超时之后迟到的回包不属于当前请求，直接丢掉，别把数据算到别的设备头上
+    if (!awaitingReply_ || transactionId != pendingTransactionId_) {
+        qWarning() << "[ModbusProducer] 收到过期回包（事务号"
+                   << transactionId << "），丢弃";
+        return;
+    }
 
     if (protocolId != 0) {
         qWarning() << "[ModbusProducer] 协议号不是 0，丢弃";
-        resetPending();
+        finishRequest();
+        return;
+    }
+
+    const DeviceConfig& device = devices_.at(pendingDeviceIndex_);
+    const quint8 unitId = static_cast<quint8>(frame[6]);
+    const quint8 functionCode = static_cast<quint8>(frame[7]);
+
+    if (unitId != static_cast<quint8>(device.unitId)) {
+        qWarning() << "[ModbusProducer] 回包从站号" << unitId
+                   << "与请求的" << device.unitId << "不符，丢弃";
+        finishRequest();
         return;
     }
 
     // 0x83 = 0x03 的最高位置 1，表示设备拒绝了这次请求
     if (functionCode != kFuncReadHolding) {
         const int exceptionCode = frame.size() > 8 ? static_cast<quint8>(frame[8]) : -1;
-        qWarning() << "[ModbusProducer] 设备返回错误，错误码" << exceptionCode;
-        resetPending();
+        qWarning() << "[ModbusProducer] 设备" << device.name
+                   << "返回错误，错误码" << exceptionCode;
+        finishRequest();
         return;
     }
 
     const int byteCount = static_cast<quint8>(frame[8]);
-    if (byteCount != kRegisterCount * 2 || frame.size() < 9 + byteCount) {
-        qWarning() << "[ModbusProducer] 数据长度不对，期望"
-                   << kRegisterCount * 2 << "实际" << byteCount;
-        resetPending();
+    if (byteCount != pendingCount_ * 2 || frame.size() < 9 + byteCount) {
+        qWarning() << "[ModbusProducer] 设备" << device.name
+                   << "数据长度不对，期望" << pendingCount_ * 2
+                   << "实际" << byteCount;
+        finishRequest();
         return;
     }
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    for (int i = 0; i < kRegisterCount; ++i) {
-        const quint16 raw = readU16(frame, 9 + i * 2);
+    for (const DevicePoint& point : device.points) {
+        const int offset = 9 + (point.registerAddress - pendingFirstRegister_) * 2;
+        const quint16 raw = readU16(frame, offset);
         const SensorReading reading{
-            QString::fromLatin1(kPoints[i].sensorId),
-            QString::fromLatin1(kPoints[i].type),
-            raw / kScale,
+            device.name,
+            point.type,
+            raw * point.scale,
             now};
         emit newReading(reading);
     }
-    resetPending();   
+    finishRequest();
 }
 
 void ModbusProducer::onDisconnected() {
     rxBuffer_.clear();
-    resetPending();
+    awaitingReply_ = false;
+    timeoutTimer_.stop();
+    pendingDeviceIndex_ = -1;
+
     if (!stopRequested_) {
         qWarning() << "[ModbusProducer] 连接断开，下一秒自动重连";
         emit linkStateChanged(false, QStringLiteral("连接断开，正在重连"));
     }
 }
 
-void ModbusProducer::resetPending() {
-    awaitingReply_ = false;
-    timeoutTimer_.stop();
-}
-
 void ModbusProducer::onRequestTimeout() {
-    qWarning() << "[ModbusProducer] 设备一秒内没回包，断开连接";
-    awaitingReply_ = false;
-    emit linkStateChanged(false, QStringLiteral("设备无响应，正在重连"));
-    socket_.abort();    // 下一次轮询会自动连接
+    if (pendingDeviceIndex_ >= 0 && pendingDeviceIndex_ < devices_.size()) {
+        // 只跳过这一台，不关连接：同一网关下的其他机柜不应该被它拖累
+        qWarning() << "[ModbusProducer] 设备"
+                   << devices_.at(pendingDeviceIndex_).name
+                   << "在" << kReplyTimeoutMs << "毫秒内没回包，跳过";
+    }
+    finishRequest();
 }
 
 QString ModbusProducer::sourceDescription() const {
@@ -213,12 +288,25 @@ QString ModbusProducer::sourceDescription() const {
     // 网线那头是一台真仪表还是模拟器，这里只能按地址推断：
     //   回环地址（127.0.0.1 / localhost / ::1）-> 基本可以认定是本机模拟器
     //   其他地址 -> 当作网络上的设备（可能是真表，也可能是别的机器上的模拟器）
-    if (host_ == QLatin1String("127.0.0.1")
-        || host_ == QLatin1String("localhost")
-        || host_ == QLatin1String("::1")) {
-        return QStringLiteral("Modbus 本机模拟设备（%1）").arg(address);
+    const bool loopback = host_ == QLatin1String("127.0.0.1")
+                          || host_ == QLatin1String("localhost")
+                          || host_ == QLatin1String("::1");
+    return QStringLiteral("%1（%2，%3 台机柜）")
+        .arg(loopback ? QStringLiteral("Modbus 本机模拟设备")
+                      : QStringLiteral("Modbus 网络设备"),
+             address)
+        .arg(devices_.size());
+}
+
+void ModbusProducer::finishRequest() {
+    awaitingReply_ = false;
+    timeoutTimer_.stop();
+    pendingDeviceIndex_ = -1;
+
+    // 一台读完立刻读下一台，整轮耗时只取决于设备响应速度
+    if (!stopRequested_ && socket_.state() == QAbstractSocket::ConnectedState) {
+        sendNextRequest();
     }
-    return QStringLiteral("Modbus 网络设备（%1）").arg(address);
 }
 
 } // namespace sensorhub
