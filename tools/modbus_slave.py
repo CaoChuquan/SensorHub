@@ -2,17 +2,20 @@
 #
 # 它是什么：
 #   一个假装成"现场设备"的小程序。SensorHub 用 --modbus 启动时，会像对待真实
-#   仪表那样每秒来读一次寄存器；没有真设备时，就让它来应答。
+#   仪表那样一台一台来读寄存器；没有真设备时，就让它来应答。
 #
 # 谁扮演谁：
 #   本脚本 = 设备（从站 / server）      SensorHub = 上位机（主站 / client）
 #   两者通过 127.0.0.1:502 通信，和真实机房里设备与上位机的关系一模一样。
 #
-# 点表必须和 src/data/ModbusProducer.cpp 里的 kPoints 保持一致：
-#   寄存器 0/1/2 = rack01 温度/湿度/电压
-#   寄存器 3/4/5 = rack02 温度/湿度/电压
-#   寄存器 6/7/8 = rack03 温度/湿度/电压
-#   寄存器里存的是"实际值 ×10"，245 表示 24.5℃
+# 模拟的是"一台网关下挂 3 台机柜"：
+#   从站号 unitId 1 → rack1 温度/湿度/电压，寄存器 0/1/2
+#   从站号 unitId 2 → rack2 温度/湿度/电压，寄存器 0/1/2
+#   从站号 unitId 3 → rack3 温度/湿度/电压，寄存器 0/1/2
+#   每台设备的寄存器表都从 0 开始，靠 unitId 区分——这是 Modbus 的标准做法。
+#   寄存器里存的是"实际值 ×10"，245 表示 24.5℃。
+#
+#   点表要和 config/devices.json 保持一致，否则读出来的数会张冠李戴。
 #
 # 用法：
 #   pip install pymodbus
@@ -28,10 +31,11 @@
 #   方便观察告警；其余点继续波动。用 auto 命令可以让冻结的点恢复波动。
 #
 # 控制台命令（出现 "> " 提示符后再输入）：
-#   list            查看当前 9 个寄存器
-#   set 0 400       把 0 号寄存器改成 400 并冻结（rack1 温度变成 40.0℃）
-#   auto            让所有被冻结的点恢复自动波动
-#   quit            退出
+#   list              查看 3 台设备的全部寄存器
+#   set 0 400         把 0 号寄存器（unitId 1、地址 0）改成 400，即 rack1 40.0℃
+#   set 5 600         5 号寄存器 → unitId 2、地址 2 → rack2 电压 60.0V
+#   auto              让所有被冻结的点恢复自动波动
+#   quit              退出
 # ──────────────────────────────────────────────────────────────────────────────
 
 import argparse
@@ -43,47 +47,65 @@ import time
 from pymodbus.server import StartAsyncTcpServer
 from pymodbus.simulator import DataType, SimData, SimDevice
 
-SLAVE_ID = 1     # 从站号，必须和 ModbusProducer 里写的 1 一致
-SCALE = 10.0     # 寄存器值 ÷ 10 = 实际值
+SCALE = 10.0      # 寄存器值 ÷ 10 = 实际值
+UNIT_IDS = [1, 2, 3]           # 三个机柜的从站号
+REGISTERS_PER_UNIT = 3         # 每台机柜 3 个寄存器
 
-# (测点名称, 单位, 初始寄存器值)
-POINTS = [
-    ("rack1 温度", "°C", 245),
-    ("rack1 湿度", "%RH", 505),
-    ("rack1 电压", "V", 2200),
-    ("rack2 温度", "°C", 240),
-    ("rack2 湿度", "%RH", 480),
-    ("rack2 电压", "V", 2210),
-    ("rack3 温度", "°C", 250),
-    ("rack3 湿度", "%RH", 520),
-    ("rack3 电压", "V", 2195),
-]
+# 每台机柜的初始寄存器值：(温度, 湿度, 电压) ×10
+INITIAL_VALUES = {
+    1: [245, 505, 2200],
+    2: [240, 480, 2210],
+    3: [250, 520, 2195],
+}
+
+METRIC_NAMES = ["温度", "湿度", "电压"]
+METRIC_UNITS = ["°C", "%RH", "V"]
 
 # pymodbus 启动时会把寄存器复制一份自己的内存，改 SimData 里的列表没用。
-# 这里借"收到请求"这个回调拿到那份正在使用的内存，后面才能改值。
-#   regs：客户端正在读的那份寄存器内存
-#   held：被手动写入过、冻结不再波动的寄存器编号
+# 这里借"收到请求"这个回调拿到每台设备正在使用的那份内存，后面才能改值。
+#   regs：unitId -> 该从站的寄存器内存
+#   held：被手动写入过、冻结不再波动的"扁平编号"（见 flat_index）
 #   last：上一秒由波动线程写入的值，用来发现有别人改过
-state = {"regs": None, "held": set(), "last": {}}
+state = {"regs": {}, "held": set(), "last": {}}
 
 
-async def on_request(func_code, start_address, address, count, registers, values):
-    """pymodbus 每处理一次请求都会调用这里，可以用来观察对方读了什么。"""
-    state["regs"] = registers
-    print(f"  <- 收到请求：功能码 {func_code}，起始地址 {address}，数量 {count}",
-          flush=True)
-    return None
+def flat_index(unit_id, register):
+    """把 (从站号, 寄存器地址) 压成一个 0~8 的编号，方便控制台输入。"""
+    return UNIT_IDS.index(unit_id) * REGISTERS_PER_UNIT + register
 
 
-def print_table(regs):
-    print("\n  编号  测点          原始值    实际值")
-    print("  " + "-" * 38)
-    for i, (name, unit, initial) in enumerate(POINTS):
-        raw = regs[i] if regs is not None else initial
-        frozen = "  [已冻结]" if i in state["held"] else ""
-        print(f"   {i}    {name:<10}  {raw:>6}   {raw / SCALE:>6.1f} {unit}{frozen}")
-    if regs is None:
-        print("  （客户端还没连上，上面显示的是初始值）")
+def flat_to_unit_register(index):
+    unit_id = UNIT_IDS[index // REGISTERS_PER_UNIT]
+    register = index % REGISTERS_PER_UNIT
+    return unit_id, register
+
+
+def make_action(unit_id):
+    """给每台从站单独做一个回调，这样能知道这条请求是哪个机柜的。"""
+
+    async def on_request(func_code, start_address, address, count, registers, values):
+        state["regs"][unit_id] = registers
+        print(f"  <- unitId {unit_id}：功能码 {func_code}，"
+              f"起始地址 {address}，数量 {count}", flush=True)
+        return None
+
+    return on_request
+
+
+def print_table():
+    for unit_id in UNIT_IDS:
+        regs = state["regs"].get(unit_id)
+        print(f"\n  unitId {unit_id}（rack{unit_id}）")
+        print("  地址  测点        原始值    实际值")
+        print("  " + "-" * 36)
+        for register in range(REGISTERS_PER_UNIT):
+            index = flat_index(unit_id, register)
+            raw = regs[register] if regs is not None else INITIAL_VALUES[unit_id][register]
+            frozen = "  [已冻结]" if index in state["held"] else ""
+            print(f"   {register}    {METRIC_NAMES[register]:<6}  {raw:>6}   "
+                  f"{raw / SCALE:>6.1f} {METRIC_UNITS[register]}{frozen}")
+        if regs is None:
+            print("  （客户端还没连上，上面显示的是初始值）")
     print(flush=True)
 
 
@@ -103,6 +125,8 @@ def console_loop():
               flush=True)
         print("       如果打字没反应，请改用独立的命令行窗口运行：", flush=True)
         print("       start cmd /k python tools\\modbus_slave_sim.py", flush=True)
+
+    total = len(UNIT_IDS) * REGISTERS_PER_UNIT
     while True:
         line = input("> ").strip()
         if not line:
@@ -114,7 +138,7 @@ def console_loop():
         if cmd in ("quit", "exit"):
             return
         if cmd == "list":
-            print_table(state["regs"])
+            print_table()
         elif cmd == "set":
             if len(parts) != 3:
                 print("用法：set <编号> <原始值>，例如 set 0 400")
@@ -124,22 +148,25 @@ def console_loop():
             except ValueError:
                 print("编号和值都必须是整数")
                 continue
-            if not 0 <= index < len(POINTS):
-                print(f"编号只能是 0~{len(POINTS) - 1}")
+            if not 0 <= index < total:
+                print(f"编号只能是 0~{total - 1}")
                 continue
             if not 0 <= value <= 65535:
                 print("寄存器是 16 位无符号整数，值只能是 0~65535")
                 continue
-            if state["regs"] is None:
-                print("还没有客户端连上来，等 SensorHub 连上后再改")
+
+            unit_id, register = flat_to_unit_register(index)
+            regs = state["regs"].get(unit_id)
+            if regs is None:
+                print(f"unitId {unit_id} 还没有客户端连上来，等 SensorHub 连上后再改")
                 continue
-            state["regs"][index] = value
+            regs[register] = value
             # 手动设过的点冻结住，否则下一秒就被波动线程改跑了
             state["held"].add(index)
             state["last"][index] = value
-            name, unit, _ = POINTS[index]
-            print(f"已设置 {name} = {value}（实际 {value / SCALE:.1f}{unit}），"
-                  f"该点已冻结")
+            print(f"已设置 unitId {unit_id} 地址 {register}"
+                  f"（rack{unit_id} {METRIC_NAMES[register]}）= {value}"
+                  f"（实际 {value / SCALE:.1f}{METRIC_UNITS[register]}），该点已冻结")
         elif cmd == "auto":
             state["held"].clear()
             state["last"].clear()
@@ -148,10 +175,10 @@ def console_loop():
             print("未知命令。可用：list / set <编号> <原始值> / auto / quit")
 
 
-# 下面两组只在 --drift（自动波动）模式下使用：
+# 下面两组只在自动波动模式下使用：
 # 每次改动的最大幅度（寄存器原始值），以及允许的取值范围
-DRIFT_STEP = [2, 5, 3] * 3
-DRIFT_RANGE = [(180, 320), (400, 650), (2150, 2250)] * 3
+DRIFT_STEP = [2, 5, 3]
+DRIFT_RANGE = [(180, 320), (400, 650), (2150, 2250)]
 
 
 def drift_loop():
@@ -165,46 +192,51 @@ def drift_loop():
     import random
     while True:
         time.sleep(1)
-        regs = state["regs"]
-        if regs is None:      # 客户端还没连上，先不动
-            continue
-        for i in range(len(POINTS)):
-            if i in state["held"]:
+        for unit_id in UNIT_IDS:
+            regs = state["regs"].get(unit_id)
+            if regs is None:      # 这台设备还没有客户端读过，先不动
                 continue
+            for register in range(REGISTERS_PER_UNIT):
+                index = flat_index(unit_id, register)
+                if index in state["held"]:
+                    continue
 
-            previous = state["last"].get(i)
-            if previous is not None and regs[i] != previous:
-                state["held"].add(i)   # 有外部写入，冻结它
-                continue
+                previous = state["last"].get(index)
+                if previous is not None and regs[register] != previous:
+                    state["held"].add(index)   # 有外部写入，冻结它
+                    continue
 
-            low, high = DRIFT_RANGE[i]
-            step = DRIFT_STEP[i]
-            value = max(low, min(high, regs[i] + random.randint(-step, step)))
-            regs[i] = value
-            state["last"][i] = value
+                low, high = DRIFT_RANGE[register]
+                step = DRIFT_STEP[register]
+                value = max(low, min(high, regs[register] + random.randint(-step, step)))
+                regs[register] = value
+                state["last"][index] = value
 
 
-def run_server(device, host, port):
+def run_server(devices, host, port):
     """在后台线程里跑 asyncio 事件循环，主线程专心处理控制台输入。"""
-    asyncio.run(StartAsyncTcpServer(context=device, address=(host, port)))
+    asyncio.run(StartAsyncTcpServer(context=devices, address=(host, port)))
 
 
 def main(args):
-    holding = SimData(
-        address=0,
-        count=len(POINTS),
-        values=[p[2] for p in POINTS],
-        datatype=DataType.REGISTERS,
-    )
-    # simdata 传列表即可；action 是官方提供的"每收到请求回调一次"的钩子
-    device = SimDevice(id=SLAVE_ID, simdata=[holding], action=on_request)
+    devices = []
+    for unit_id in UNIT_IDS:
+        holding = SimData(
+            address=0,
+            count=REGISTERS_PER_UNIT,
+            values=list(INITIAL_VALUES[unit_id]),
+            datatype=DataType.REGISTERS,
+        )
+        # simdata 传列表即可；action 是官方提供的"每收到请求回调一次"的钩子
+        devices.append(SimDevice(id=unit_id, simdata=[holding],
+                                 action=make_action(unit_id)))
 
     print(f"Modbus 从站已启动：{args.host}:{args.port}"
-          f"（从站号 {SLAVE_ID}，{len(POINTS)} 个保持寄存器）")
+          f"（从站号 {UNIT_IDS}，每台 {REGISTERS_PER_UNIT} 个保持寄存器）")
     print(f"SensorHub 连接参数：--modbus 127.0.0.1:{args.port}")
 
     threading.Thread(target=run_server,
-                     args=(device, args.host, args.port),
+                     args=(devices, args.host, args.port),
                      daemon=True).start()
 
     if args.static:
