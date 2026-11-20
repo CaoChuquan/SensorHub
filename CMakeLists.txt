@@ -45,6 +45,7 @@ add_library(sensorhub_core STATIC
     src/data/ISensorProducer.cpp
     src/data/ModbusProducer.cpp
     src/data/SimulationProducer.cpp
+    src/data/DeviceConfigLoader.cpp
     # 服务
     src/services/AlarmService.cpp
     src/services/AnalysisService.cpp

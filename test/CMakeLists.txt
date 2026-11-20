@@ -22,3 +22,10 @@ target_link_libraries(tst_storage PRIVATE
     ${QT_LIB_PREFIX}::Test
 )
 add_test(NAME tst_storage COMMAND tst_storage)
+
+add_executable(tst_deviceconfig tst_deviceconfig.cpp)
+target_link_libraries(tst_deviceconfig PRIVATE
+    sensorhub_core
+    ${QT_LIB_PREFIX}::Test
+)
+add_test(NAME tst_deviceconfig COMMAND tst_deviceconfig)
