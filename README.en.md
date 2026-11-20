@@ -94,6 +94,8 @@ With Qt Creator, simply open `CMakeLists.txt` and pick a kit.
 
 The address accepts either `IP` or `IP:port`; the port defaults to 502.
 
+> With Qt Creator or a multi-config generator (Visual Studio), the executable is usually placed under `build/Debug/` or `build/Release/`; adjust the path accordingly.
+
 ### Without real hardware
 
 `tools/` contains a pymodbus-based slave simulator that plays the field device while SensorHub acts as the Modbus master:

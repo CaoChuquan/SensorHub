@@ -94,6 +94,8 @@ cmake --build build
 
 地址支持 `IP` 或 `IP:端口` 两种写法，省略端口时默认 502。
 
+> 使用 Qt Creator 或多配置生成器（Visual Studio）构建时，可执行文件通常位于 `build/Debug/` 或 `build/Release/` 子目录，按实际路径运行。
+
 ### 没有真实设备时
 
 `tools/` 下提供了一个基于 pymodbus 的从站模拟器，它扮演现场设备，SensorHub 扮演上位机主站：
