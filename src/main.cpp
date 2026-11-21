@@ -129,6 +129,9 @@ int main(int argc, char* argv[]) {
     QObject::connect(producer.get(), &ISensorProducer::newReading,
                      &hub, &DataHub::publish);
 
+    QObject::connect(producer.get(), &ISensorProducer::deviceStatusChanged,
+                     &hub, &DataHub::publishStatus);
+
     QObject::connect(producer.get(), &ISensorProducer::linkStateChanged,
                      &window, &MainWindow::setLinkState);
 

@@ -10,6 +10,7 @@ constexpr int kPollIntervalMs = 1000;      // 每秒开始一轮
 constexpr int kReplyTimeoutMs = 500;       // 单台设备最多等 500 毫秒
 constexpr int kMaxRegistersPerRead = 125;  // Modbus 单次读寄存器的上限
 constexpr quint8 kFuncReadHolding = 0x03;  // 功能码 03：读保持寄存器
+constexpr int kFailuresBeforeOffline = 3;  // 连续失败几次才判离线
 
 // Modbus 规定多字节数字"高位在前"，Qt 没有现成的写 16 位函数，手写两行
 void appendU16(QByteArray& out, quint16 value) {
@@ -28,6 +29,10 @@ quint16 readU16(const QByteArray& data, int offset) {
 ModbusProducer::ModbusProducer(QVector<DeviceConfig> devices, QObject* parent)
     : ISensorProducer(parent), devices_(std::move(devices)) 
 {
+    // 每台设备各一份状态，下标和 devices_ 对齐
+    failureCounts_.fill(0, devices_.size());
+    onlineFlags_.fill(false, devices_.size());
+    lastSeenMs_.fill(0, devices_.size());
 
     if (!devices_.isEmpty()) {
         host_ = devices_.first().host;
@@ -65,6 +70,7 @@ ModbusProducer::ModbusProducer(QVector<DeviceConfig> devices, QObject* parent)
             this, [this](QAbstractSocket::SocketError) {
                 if (stopRequested_) return;
                 qWarning() << "[ModbusProducer] 连接失败：" << socket_.errorString();
+                markAllOffline(QStringLiteral("无法连接网关"));                
                 emit linkStateChanged(false,
                     QStringLiteral("连接失败，正在重连"));
             });
@@ -80,6 +86,14 @@ void ModbusProducer::start() {
     }
 
     pollTimer_.start();
+
+    // 先告诉界面"这些设备还没采到数"，而不是假装它们在线
+    // 等第一帧成功回包再逐个转成在线
+    for (int i = 0; i < devices_.size(); ++i) {
+        emit deviceStatusChanged({devices_.at(i).name, false, 0,
+                                  QStringLiteral("等待首次采集")});
+    }
+
     // 连接是异步的：这里只是"发起连接"，连上之后会触发 onConnected
     socket_.connectToHost(host_, port_);
 }
@@ -195,7 +209,8 @@ void ModbusProducer::onReadyRead() {
 void ModbusProducer::handleFrame(const QByteArray& frame) {
     // 最短也要有：MBAP 头 7 字节 + 功能码 1 字节 + 字节数 1 字节
     if (frame.size() < 9) {
-        qWarning() << "[ModbusProducer] 回包太短，丢弃";
+        // 不在这里刷日志：失败原因由 markFailure 在判定离线时统一说明
+        markFailure(pendingDeviceIndex_, QStringLiteral("回包格式错误"));
         finishRequest();
         return;
     }
@@ -211,7 +226,7 @@ void ModbusProducer::handleFrame(const QByteArray& frame) {
     }
 
     if (protocolId != 0) {
-        qWarning() << "[ModbusProducer] 协议号不是 0，丢弃";
+        markFailure(pendingDeviceIndex_, QStringLiteral("回包协议号异常"));
         finishRequest();
         return;
     }
@@ -221,8 +236,7 @@ void ModbusProducer::handleFrame(const QByteArray& frame) {
     const quint8 functionCode = static_cast<quint8>(frame[7]);
 
     if (unitId != static_cast<quint8>(device.unitId)) {
-        qWarning() << "[ModbusProducer] 回包从站号" << unitId
-                   << "与请求的" << device.unitId << "不符，丢弃";
+        markFailure(pendingDeviceIndex_, QStringLiteral("回包从站号不符"));
         finishRequest();
         return;
     }
@@ -230,20 +244,20 @@ void ModbusProducer::handleFrame(const QByteArray& frame) {
     // 0x83 = 0x03 的最高位置 1，表示设备拒绝了这次请求
     if (functionCode != kFuncReadHolding) {
         const int exceptionCode = frame.size() > 8 ? static_cast<quint8>(frame[8]) : -1;
-        qWarning() << "[ModbusProducer] 设备" << device.name
-                   << "返回错误，错误码" << exceptionCode;
+        markFailure(pendingDeviceIndex_,
+                    QStringLiteral("设备返回错误码 %1").arg(exceptionCode));
         finishRequest();
         return;
     }
 
     const int byteCount = static_cast<quint8>(frame[8]);
     if (byteCount != pendingCount_ * 2 || frame.size() < 9 + byteCount) {
-        qWarning() << "[ModbusProducer] 设备" << device.name
-                   << "数据长度不对，期望" << pendingCount_ * 2
-                   << "实际" << byteCount;
+        markFailure(pendingDeviceIndex_, QStringLiteral("回包长度不符"));
         finishRequest();
         return;
     }
+
+    markOnline(pendingDeviceIndex_);
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     for (const DevicePoint& point : device.points) {
@@ -267,17 +281,15 @@ void ModbusProducer::onDisconnected() {
 
     if (!stopRequested_) {
         qWarning() << "[ModbusProducer] 连接断开，下一秒自动重连";
+        markAllOffline(QStringLiteral("网关连接断开"));
         emit linkStateChanged(false, QStringLiteral("连接断开，正在重连"));
     }
 }
 
 void ModbusProducer::onRequestTimeout() {
-    if (pendingDeviceIndex_ >= 0 && pendingDeviceIndex_ < devices_.size()) {
-        // 只跳过这一台，不关连接：同一网关下的其他机柜不应该被它拖累
-        qWarning() << "[ModbusProducer] 设备"
-                   << devices_.at(pendingDeviceIndex_).name
-                   << "在" << kReplyTimeoutMs << "毫秒内没回包，跳过";
-    }
+    // 只跳过这一台，不关连接：同一网关下的其他机柜不应该被它拖累
+    markFailure(pendingDeviceIndex_,
+                QStringLiteral("%1 毫秒内无响应").arg(kReplyTimeoutMs));
     finishRequest();
 }
 
@@ -306,6 +318,52 @@ void ModbusProducer::finishRequest() {
     // 一台读完立刻读下一台，整轮耗时只取决于设备响应速度
     if (!stopRequested_ && socket_.state() == QAbstractSocket::ConnectedState) {
         sendNextRequest();
+    }
+}
+
+void ModbusProducer::markOnline(int deviceIndex) {
+    if (deviceIndex < 0 || deviceIndex >= devices_.size()) return;
+
+    lastSeenMs_[deviceIndex] = QDateTime::currentMSecsSinceEpoch();
+    failureCounts_[deviceIndex] = 0;
+
+    // 只有"离线 → 在线"这个跳变才通知界面，正常刷新不重复发，
+    // 否则每秒 3 条状态信号，界面白白重绘。
+    if (!onlineFlags_[deviceIndex]) {
+        onlineFlags_[deviceIndex] = true;
+        qInfo() << "[ModbusProducer] 设备" << devices_.at(deviceIndex).name
+                << "恢复在线";
+        emit deviceStatusChanged({devices_.at(deviceIndex).name, true,
+                                  lastSeenMs_[deviceIndex], QString()});
+    }
+}
+
+void ModbusProducer::markFailure(int deviceIndex, const QString& reason) {
+    if (deviceIndex < 0 || deviceIndex >= devices_.size()) return;
+
+    ++failureCounts_[deviceIndex];
+    if (failureCounts_[deviceIndex] != kFailuresBeforeOffline) {
+        // 还没到阈值，或者已经报过离线了——都不再重复发
+        return;
+    }
+
+    onlineFlags_[deviceIndex] = false;
+    const QString message = QStringLiteral("%1（连续 %2 次）")
+                                .arg(reason)
+                                .arg(failureCounts_[deviceIndex]);
+    qWarning() << "[ModbusProducer] 设备" << devices_.at(deviceIndex).name
+               << "判定离线：" << message;
+    emit deviceStatusChanged({devices_.at(deviceIndex).name, false,
+                              lastSeenMs_[deviceIndex], message});
+}
+
+void ModbusProducer::markAllOffline(const QString& reason) {
+    for (int i = 0; i < devices_.size(); ++i) {
+        if (!onlineFlags_[i]) continue; // 本来就是离线的不重复通知
+        onlineFlags_[i] = false;
+        failureCounts_[i] = 0;
+        emit deviceStatusChanged({devices_.at(i).name, false,
+                                  lastSeenMs_[i], reason});
     }
 }
 

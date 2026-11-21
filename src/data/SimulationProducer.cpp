@@ -56,6 +56,13 @@ void SimulationProducer::produceTick() {
             emit newReading(reading);
         }
     }
+
+    // 仿真数据源永远在线：每轮顺带报一次设备状态，
+    // 让界面能像对待真实设备那样显示"这些机柜是活的"
+    for (int i = 0; i < kDeviceCount; ++i) {
+        emit deviceStatusChanged({QString::fromLatin1(kDeviceId[i]), true, now,
+                                  QString()});
+    }
 }
 
 } // namespace sensorhub

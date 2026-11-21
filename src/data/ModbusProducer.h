@@ -1,10 +1,12 @@
 #pragma once
 
-#include "data/ISensorProducer.h"
-#include "data/DeviceConfig.h"
 #include <QTcpSocket>
 #include <QTimer>
 #include <QString>
+
+#include "data/ISensorProducer.h"
+#include "data/DeviceConfig.h"
+#include "data/DeviceStatus.h"
 
 namespace sensorhub {
 
@@ -47,6 +49,14 @@ private:
     void finishRequest();                    // 当前请求结束（成功/失败都走这里）
     void handleFrame(const QByteArray& frame); // 解析一帧完整回包
 
+    // 设备状态
+    // 采集成功：刷新最后成功时间，失败计数清零；从离线恢复时报一次"在线"
+    void markOnline(int deviceIndex);
+    // 采集失败：累加失败次数，连续失败达到阈值才判离线，避免偶发一个丢包就在界面上闪一下红
+    void markFailure(int deviceIndex, const QString& reason);
+    // 整条连接断开时，把所有在线设备一次性标成离线并说明原因
+    void markAllOffline(const QString& reason);
+
     QVector<DeviceConfig> devices_;
     QString host_;
     quint16 port_ = 502;
@@ -62,6 +72,10 @@ private:
     int pendingFirstRegister_ = 0;  // 这条请求从哪个寄存器开始
     int pendingCount_ = 0;          // 读了多少个寄存器
     int nextDeviceIndex_ = 0;       // 本轮下一台要读的设备下标
+
+    QVector<int> failureCounts_;   // 连续失败次数
+    QVector<bool> onlineFlags_;    // 当前是否在线
+    QVector<qint64> lastSeenMs_;   // 最后一次成功采集的时刻
 
     bool awaitingReply_ = false;
     bool stopRequested_ = false; // 是否正在主动停止，只用于在 onDisconnected 里区分

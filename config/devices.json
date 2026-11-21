@@ -3,7 +3,7 @@
     {
       "name": "rack1",
       "host": "127.0.0.1",
-      "port": 502,
+      "port": 15020,
       "unitId": 1,
       "points": [
         { "type": "temperature", "register": 0, "scale": 0.1, "unit": "℃" },
@@ -12,25 +12,12 @@
       ]
     },
     {
-      "name": "rack2",
+      "name": "ghost",
       "host": "127.0.0.1",
-      "port": 502,
-      "unitId": 2,
+      "port": 15020,
+      "unitId": 9,
       "points": [
-        { "type": "temperature", "register": 0, "scale": 0.1, "unit": "℃" },
-        { "type": "humidity", "register": 1, "scale": 0.1, "unit": "%RH" },
-        { "type": "voltage", "register": 2, "scale": 0.1, "unit": "V" }
-      ]
-    },
-    {
-      "name": "rack3",
-      "host": "127.0.0.1",
-      "port": 502,
-      "unitId": 3,
-      "points": [
-        { "type": "temperature", "register": 0, "scale": 0.1, "unit": "℃" },
-        { "type": "humidity", "register": 1, "scale": 0.1, "unit": "%RH" },
-        { "type": "voltage", "register": 2, "scale": 0.1, "unit": "V" }
+        { "type": "temperature", "register": 0, "scale": 0.1, "unit": "℃" }
       ]
     }
   ]

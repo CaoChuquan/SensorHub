@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data/DeviceStatus.h"
 #include "data/SensorTypes.h"
 #include <QObject>
 
@@ -26,6 +27,9 @@ signals:
     //   online=true  ：连上了 / 正在正常出数据
     //   online=false ：断了，reason 里写原因
     void linkStateChanged(bool online, const QString& reason);
+    // 单台设备的状态变化（连上/离线、离线原因）
+    // 用于通知"具体哪个机柜有没有数据"，一台设备掉线只发对应一条
+    void deviceStatusChanged(const sensorhub::DeviceStatus& status);    
 };
 
 } // namespace sensorhub
